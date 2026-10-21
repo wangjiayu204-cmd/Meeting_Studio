@@ -59,6 +59,21 @@ class Meeting(MeetingCreate):
     created_at: AwareDatetime = Field(default_factory=utc_now)
 
 
+class MeetingSummary(Contract):
+    id: str
+    title: str
+    meeting_date: date
+    timezone: str
+    created_at: AwareDatetime
+
+
+class MeetingPage(Contract):
+    items: list[MeetingSummary]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+
+
 class Decision(Contract):
     text: NonEmpty = Field(max_length=1500)
     source_refs: list[ParagraphRef] = Field(min_length=1)

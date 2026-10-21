@@ -2,12 +2,18 @@ from contextlib import asynccontextmanager
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
+from starlette.concurrency import run_in_threadpool
 
 from app import __version__
 from app.api.health import router as health_router
+from app.api.meetings import router as meetings_router
+from app.api.body_limit import BodyLimitMiddleware
 from app.core.config import Settings
 from app.core.errors import ErrorResponse, error_response, register_error_handlers
 from app.core.logging import configure_logging
+from app.repositories.database import Database
+from app.repositories.meetings import MeetingRepository
+from app.services.meetings import MeetingService
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -16,14 +22,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
-        logger.info("application_started phase=P1")
-        yield
-        logger.info("application_stopped")
+        await run_in_threadpool(application.state.database.initialize)
+        logger.info("application_started phase=P2")
+        try:
+            yield
+        finally:
+            logger.info("application_stopped")
 
     app = FastAPI(
         title=config.app_name,
         version=__version__,
-        description="轻量多 Agent 会议与任务管理。P1：配置、领域契约、健康检查。",
+        description="轻量多 Agent 会议与任务管理。P2：文档解析、会议持久化与查询。",
         lifespan=lifespan,
         responses={
             422: {"model": ErrorResponse, "description": "参数校验失败"},
@@ -31,7 +40,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         },
     )
     app.state.settings = config
+    app.state.database = Database(config.database_path)
+    app.state.meeting_service = MeetingService(MeetingRepository(app.state.database), config)
     register_error_handlers(app)
+    # 为 JSON 转义及 multipart 元数据预留空间；文件仍执行独立字节限制。
+    app.add_middleware(BodyLimitMiddleware, max_bytes=max(
+        config.max_upload_bytes + 262144, config.max_document_chars * 6 + 262144,
+    ))
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
@@ -48,4 +63,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     app.include_router(health_router, prefix="/api")
+    app.include_router(meetings_router, prefix="/api")
     return app

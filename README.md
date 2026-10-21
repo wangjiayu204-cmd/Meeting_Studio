@@ -1,6 +1,6 @@
 # 智能会议与任务闭环管理
 
-当前完成 **P1：可启动基础**。包含配置、领域数据契约、统一错误处理、请求追踪和应用健康检查。文档解析、数据库、Agent、业务接口和前端按后续阶段交付。
+当前完成 **P2：文档与数据**。包含应用基础、SQLite 持久化、TXT / 文本型 PDF 解析、会议创建与分页查询。Agent、草稿、看板与前端按后续阶段交付。
 
 实施步骤见 [模块化实施方案.md](模块化实施方案.md)。
 
@@ -20,7 +20,7 @@ bash scripts/run.sh
 - Swagger：http://127.0.0.1:8080/docs
 - OpenAPI：http://127.0.0.1:8080/openapi.json
 
-当前没有首页；根路径返回统一格式的 404。健康检查只报告应用存活，数据库为 `not_configured`、模型为 `not_checked`，不会发起模型请求。
+当前没有首页；根路径返回统一格式的 404。健康检查验证数据库版本及表可访问性，数据库正常时为 `ok`，异常返回 503。模型为 `not_checked`，不会发起模型请求。
 
 自定义端口或监听地址：
 
@@ -36,7 +36,43 @@ PM_PORT=8081 bash scripts/run.sh
 
 模型地址默认 `http://127.0.0.1:8000/v1`，名称 `qwen3-8b`。切换 DCU 修改 `PM_LLM_BASE_URL` 和必要的鉴权。HTTP 调用将在 P3 实现。
 
-数据库相对路径始终基于项目根目录解析，不随启动目录变化；P1 不创建数据库。日志只记录基础状态与请求 ID，不输出模型密钥或完整会议内容。
+数据库相对路径始终基于项目根目录解析，不随启动目录变化。启动自动初始化 `data/pm.sqlite3`，启用外键和 WAL，以 `PRAGMA user_version` 管理版本；遇到高于支持版本的数据库拒绝启动。数据库不提交 Git。日志只记录基础状态与请求 ID，不输出模型密钥或完整会议内容。
+
+## 会议接口
+
+所有路径以 `/api` 开头，Swagger 可直接填写参数测试：
+
+| 方法与路径 | 功能 |
+|---|---|
+| `POST /api/meetings` | JSON 创建会议，返回 201、会议 ID 和段落 |
+| `POST /api/meetings/upload` | multipart 上传文档及元信息 |
+| `GET /api/meetings?limit=20&offset=0` | 历史分页，返回 items / total / limit / offset |
+| `GET /api/meetings/{id}` | 原文、稳定段落 ID 和人员等详情 |
+
+创建会议示例：
+
+```bash
+curl --noproxy '*' http://127.0.0.1:8080/api/meetings \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"登录模块例会","meeting_date":"2026-10-21","text":"张三负责本周完成登录接口联调，提交接口文档。"}'
+```
+
+上传示例（在项目根目录执行）：
+
+```bash
+curl --noproxy '*' http://127.0.0.1:8080/api/meetings/upload \
+  -F 'file=@examples/meeting.txt' \
+  -F 'title=登录模块迭代例会' \
+  -F 'meeting_date=2026-10-21' \
+  -F 'timezone=Asia/Shanghai' \
+  -F 'members=[{"name":"张三","role":"后端"}]'
+```
+
+日期必填；时区省略时使用 `PM_TIMEZONE`。上传 members 是 JSON 数组字符串；JSON 创建时 members 直接传数组。历史列表不返回全文，查看详情获取原文。输入只保存会议，不自动调用模型。
+
+默认文件上限 10 MiB、文本 24000 字符、PDF 100 页，均可配置。TXT 支持 UTF-8、UTF-8 BOM 和 GB18030。扫描件、加密或损坏 PDF 明确报错；不支持的类型返回 415，超限返回 413，解析或参数错误返回 422。请求体还有总大小保护，防止解析前超大上传。
+
+原文换行规范化、移除 NUL 字符并去除首尾空白；按非空行生成 `p0001` 等编号。原文与段落原子保存，不保存上传文件到用户指定路径。耗时解析和同步数据库操作在线程中运行。应用重启后数据保留，原文暂不提供修改接口以保证引用稳定。
 
 ## 数据契约
 
@@ -63,6 +99,7 @@ conda activate demo1
 cd /app/data/wjy/demo
 python -m pytest
 bash -n scripts/run.sh
+python scripts/smoke_meetings.py
 ```
 
-P1 测试离线执行，无需模型和数据库。依赖声明在 `requirements.txt`；验收全项目后再生成环境快照。
+测试离线执行，无需模型服务，数据库使用测试临时目录；包含真实生成的 PDF 解析、SQLite 事务与重启持久化验证。`smoke_meetings.py` 会在临时端口启动两次真实服务，使用隔离数据库检查 HTTP 接口及重启持久化，结束后自动停止进程并清理临时数据。依赖声明在 `requirements.txt`；验收全项目后再生成环境快照。

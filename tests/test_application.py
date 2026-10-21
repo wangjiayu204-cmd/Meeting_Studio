@@ -34,16 +34,16 @@ def app(tmp_path):
     return application
 
 
-def test_health_does_not_require_database_or_model(app):
+def test_health_checks_database_without_requiring_model(app):
     with TestClient(app) as client:
         response = client.get("/api/health")
         assert response.status_code == 200
         assert response.json() == {
-            "status": "ok", "version": "0.1.0", "phase": "P1",
-            "database": "not_configured", "model": "not_checked",
+            "status": "ok", "version": "0.1.0", "phase": "P2",
+            "database": "ok", "model": "not_checked",
         }
         assert len(response.headers["x-request-id"]) == 32
-        assert not app.state.settings.database_path.exists()
+        assert app.state.settings.database_path.exists()
 
 
 def test_docs_and_openapi_are_available(app):
