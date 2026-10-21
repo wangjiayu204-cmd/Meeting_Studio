@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="把会议中的共识，变成可追踪的行动。智能会议与任务闭环工作台。">
+  <title>序会 · 智能会议工作台</title>
+  <link rel="icon" href="/static/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script type="module" src="/static/js/app.mjs"></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">跳到工作区</a>
+  <aside class="sidebar" aria-label="会议导航">
+    <a class="brand" href="/" aria-label="序会首页"><img src="/static/mark.svg" alt="" width="36" height="36"><span>序会 <small>MEETING STUDIO</small></span></a>
+    <div class="workspace-label"><span class="status-dot"></span> 项目协作空间 <span class="tag">LOCAL</span></div>
+    <button id="new-meeting" class="button primary wide"><span aria-hidden="true">＋</span> 新建会议</button>
+    <div class="sidebar-heading"><span>会议档案</span><button id="history-refresh" class="icon-button" aria-label="刷新会议列表">↻</button></div>
+    <div id="history" class="history-list" aria-live="polite"><p class="muted">正在读取会议…</p></div>
+    <div class="pagination"><button id="history-prev" class="button subtle small">上一页</button><span id="history-page" class="muted">—</span><button id="history-next" class="button subtle small">下一页</button></div>
+    <div class="sidebar-bottom"><div class="avatar">PM</div><div>让每一次会议<br><strong>都有下一步。</strong></div><a href="/docs" target="_blank" rel="noopener" aria-label="打开接口文档">↗</a></div>
+  </aside>
+
+  <main id="workspace" class="main">
+    <header class="topbar"><div><span class="muted">工作空间</span><span class="breadcrumb">/</span><strong>会议工作台</strong></div><div class="topbar-actions"><span id="system-status" class="connection">正在连接</span><button id="model-check" class="button subtle small">检查模型连接</button></div></header>
+    <section class="hero"><div class="hero-copy"><div class="eyebrow">FROM CONVERSATION TO ACTION</div><h1>共识，从这里开始落地<span>。</span></h1><p>让智能协作梳理议题、规划任务、复核细节，<br class="desktop-break">将每一个明确的决定，推进到下一步。</p><div class="hero-tags"><span>4 位协作 Agent</span><i></i><span>原文依据可追溯</span><i></i><span>执行前人工确认</span></div></div><div class="hero-art" aria-hidden="true"><div class="orbit orbit-one"></div><div class="orbit orbit-two"></div><div class="orbit orbit-three"></div><div class="art-core">序<span>把讨论连成行动</span></div><span class="orbit-label label-one">理解</span><span class="orbit-label label-two">规划</span><span class="orbit-label label-three">行动</span></div></section>
+
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <section id="create-panel" class="panel create-panel" aria-labelledby="create-heading">
+      <div class="section-heading"><div><div class="eyebrow teal">START A MEETING</div><h2 id="create-heading">把会议交给智能协作</h2><p class="muted">粘贴纪要或上传文档，先保存会议，再启动分析。</p></div><button id="fill-example" class="button subtle">体验示例 ↗</button></div>
+      <form id="meeting-form">
+        <div class="form-grid"><label>会议名称<input id="meeting-title" name="title" maxlength="160" required placeholder="例如：产品迭代周会"></label><label>会议日期<input id="meeting-date" name="meeting_date" type="date" required></label><label>会议时区<input id="meeting-timezone" name="timezone" required value="Asia/Shanghai" placeholder="Asia/Shanghai"></label></div>
+        <label>参会人员 <span class="muted">（可选，每行一人，格式：姓名｜角色）</span><textarea id="meeting-members" rows="2" placeholder="张三｜后端&#10;李四｜测试"></textarea></label>
+        <div class="input-mode" role="group" aria-label="会议输入方式"><button type="button" id="mode-text" class="segment selected" aria-pressed="true">粘贴纪要</button><button type="button" id="mode-file" class="segment" aria-pressed="false">上传文档</button></div>
+        <div id="text-input-panel"><label for="meeting-text" class="sr-only">会议纪要正文</label><textarea id="meeting-text" rows="7" placeholder="记录讨论议题、决策与行动项。负责人和截止日期不明确的内容，将保留为待确认事项。"></textarea><div class="input-meta"><span>明确的信息更容易形成可靠的任务</span><span id="text-count">0 字</span></div></div>
+        <div id="file-input-panel" hidden><label id="dropzone" class="dropzone" for="meeting-file"><span class="upload-icon">↥</span><strong>拖拽文档到这里，或点击选择</strong><span id="file-hint">支持 TXT、文本型 PDF</span><input id="meeting-file" type="file" accept=".txt,.pdf" class="sr-only"></label><p id="file-name" class="muted">尚未选择文件</p></div>
+        <div class="form-footer"><span class="muted">保存后可核对原文，再启动分析</span><button id="create-submit" class="button primary" type="submit">创建会议 <span aria-hidden="true">→</span></button></div>
+      </form>
+    </section>
+
+    <section id="meeting-panel" hidden>
+      <div class="meeting-header"><div><div class="eyebrow teal">MEETING WORKSPACE</div><h2 id="current-title"></h2><p id="current-meta" class="muted"></p></div><div class="button-group"><button id="refresh-meeting" class="button subtle">刷新状态</button><button id="analyze" class="button primary">开始智能分析 <span aria-hidden="true">↗</span></button></div></div>
+      <div class="metrics" id="metrics"></div>
+      <div class="work-grid">
+        <div class="context-column">
+          <section class="panel"><div class="section-heading compact"><div><span class="eyebrow teal">AGENT TEAM</span><h3>协作进度</h3></div><span id="run-state" class="badge">尚未运行</span></div><div id="agents" class="agent-list"></div><label class="run-select-label">运行记录<select id="run-select" aria-label="查看运行记录"></select></label><div id="run-error" class="inline-error" hidden></div><div class="run-actions"><button id="retry-run" class="button subtle small" hidden>重试本次运行</button><span id="stream-state" class="muted"></span></div><ol id="event-log" class="event-log" aria-label="Agent 执行事件" aria-live="polite"></ol></section>
+          <section class="panel"><div class="section-heading compact"><div><span class="eyebrow teal">SOURCE OF TRUTH</span><h3>会议原文</h3></div><span id="paragraph-count" class="muted"></span></div><div id="analysis-summary" class="analysis-summary" hidden></div><div id="source-paragraphs" class="source-paragraphs"></div></section>
+        </div>
+        <section class="panel delivery-panel">
+          <div class="delivery-header"><div class="tabs" role="tablist" aria-label="会议产物"><button id="tab-draft" class="tab selected" role="tab" aria-selected="true" aria-controls="view-draft" data-tab="draft">任务草稿</button><button id="tab-board" class="tab" role="tab" aria-selected="false" aria-controls="view-board" data-tab="board" tabindex="-1">任务看板</button><button id="tab-followup" class="tab" role="tab" aria-selected="false" aria-controls="view-followup" data-tab="followup" tabindex="-1">会议跟进</button></div><div class="button-group"><button id="export-json" class="export-button" title="下载完整会议 JSON">JSON ↓</button><button id="export-ics" class="export-button" title="下载任务截止日期日历">日历 ↓</button></div></div>
+          <div id="view-draft" role="tabpanel" aria-labelledby="tab-draft">
+            <div class="draft-toolbar"><span id="draft-state" class="badge">等待分析</span><label>版本<select id="draft-version" aria-label="查看草稿版本"></select></label></div>
+            <div id="draft-warning" class="inline-warning" hidden></div><div id="draft-empty" class="empty-state"><div class="empty-symbol">✧</div><h3>让讨论变成清晰的行动</h3><p>启动分析后，任务、负责人、截止日期<br>与对应原文依据将在这里呈现。</p></div>
+            <div id="draft-editor"></div>
+            <div id="edit-actions" hidden><button id="add-task" class="button dashed wide">＋ 添加任务</button><label class="edit-note-label">修改说明<textarea id="edit-note" rows="2" maxlength="4000" placeholder="修改负责人或日期时，填写核实依据。"></textarea></label><div class="button-group"><button id="save-draft" class="button primary">保存新版本</button><button id="discard-edits" class="button subtle">放弃本地修改</button><button id="review-draft" class="button subtle">提交复核</button></div></div>
+            <section id="review-panel" class="review-panel" hidden><div class="section-heading compact"><h3>审核意见</h3><span id="review-summary" class="muted"></span></div><div id="review-issues"></div><button id="accept-issues" class="button subtle small" hidden>接受勾选问题并保存理由</button></section>
+            <div id="execution-box" class="execution-box" hidden><div class="execution-icon">↗</div><div><h3>核对完成，把计划推进为行动</h3><p id="execution-hint" class="muted"></p><label class="checkbox-label"><input id="execute-confirm" type="checkbox">我已核对当前版本的任务、负责人、日期与审核意见</label><button id="execute" class="button dark">确认执行并创建任务</button></div></div>
+          </div>
+          <div id="view-board" role="tabpanel" aria-labelledby="tab-board" hidden><div class="board-toolbar"><p class="muted">正式任务 · 状态修改自动保存</p><label>负责人<select id="owner-filter"><option value="">全部负责人</option></select></label></div><div id="board"></div><div id="calendar-preview" class="calendar-preview"></div></div>
+          <div id="view-followup" role="tabpanel" aria-labelledby="tab-followup" hidden><div id="followup"></div></div>
+        </section>
+      </div>
+    </section>
+    <footer class="page-footer"><span>序会 · 每个决定，都有回响。</span><span>智能建议 · 人工确认 · 行动可追溯</span></footer>
+  </main>
+  <dialog id="confirm-dialog" aria-labelledby="dialog-title"><form method="dialog"><div class="eyebrow teal">PLEASE CONFIRM</div><h2 id="dialog-title">确认操作</h2><p id="dialog-message"></p><div class="button-group"><button value="cancel" class="button subtle" autofocus>取消</button><button value="confirm" class="button primary">确认继续</button></div></form></dialog>
+  <noscript>请开启 JavaScript 以使用会议工作台。也可以访问 /docs 操作接口。</noscript>
+</body>
+</html>

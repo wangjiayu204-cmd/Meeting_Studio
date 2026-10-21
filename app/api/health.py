@@ -13,7 +13,7 @@ router = APIRouter(tags=["health"])
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     version: str
-    phase: Literal["P7"] = "P7"
+    phase: Literal["P8"] = "P8"
     database: Literal["ok"] = "ok"
     model: Literal["not_checked"] = "not_checked"
 

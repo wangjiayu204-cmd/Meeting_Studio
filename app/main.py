@@ -3,6 +3,7 @@ from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from starlette.concurrency import run_in_threadpool
+from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.api.health import router as health_router
@@ -30,6 +31,7 @@ from app.api.runs import router as runs_router
 from app.api.reports import router as reports_router
 from app.repositories.reports import ReportRepository
 from app.services.reports import ReportService
+from app.api.web import WEB_ROOT, router as web_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -52,7 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         application.state.run_manager = RunManager(application.state.planning_service,
                                                    application.state.execution_service, config)
-        logger.info("application_started phase=P7")
+        logger.info("application_started phase=P8")
         try:
             yield
         finally:
@@ -63,7 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title=config.app_name,
         version=__version__,
-        description="轻量多 Agent 会议与任务管理。P7：JSON / ICS 导出与会议跟进。",
+        description="轻量多 Agent 会议与任务管理。P8：原生网页工作台与完整操作链路。",
         lifespan=lifespan,
         responses={
             422: {"model": ErrorResponse, "description": "参数校验失败"},
@@ -104,4 +106,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(tasks_router, prefix="/api")
     app.include_router(runs_router, prefix="/api")
     app.include_router(reports_router, prefix="/api")
+    app.include_router(web_router)
+    app.mount("/static", StaticFiles(directory=WEB_ROOT), name="static")
     return app

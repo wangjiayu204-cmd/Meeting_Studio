@@ -38,4 +38,6 @@ test_artifacts/
 
 `python scripts/smoke_exports.py` 验证真实四角色执行后的 JSON / ICS / 跟进接口。API 目录保留 01_reviewed_draft.json、02_execution.json、03_meeting_export.json（完整会议与任务快照）、04_tasks.ics（实际下载文件，可导入日历）、05_followup.json 和 06_restart_followup.json。summary.json 给出任务数、日历项数、完成 / 待办 / 逾期等统计和重启结果；对应 HTTP 交换也全部保存。该脚本使用临时会议，执行前验证日历返回 409，执行后完成其中一个任务再导出，不修改现有业务数据库。
 
+`python scripts/smoke_interface.py` 无需浏览器，使用现有 Node 18+ 运行实际前端 api.mjs / state.mjs / runs.mjs 调用临时 FastAPI 与真实 vLLM。SSE 使用测试传输适配器，主动断开重连并检查去重；其余覆盖上传、编辑、复核、旧版本冲突、执行幂等、状态、下载和服务重启。保留 00_home.html、http_*.json、各阶段 events / run / connections、03_initial_draft.json、05_reviewed_draft.json、05_final_draft.json、07_meeting_export.json、08_tasks.ics、09_followup.json、node.log 和 summary.json。若模拟人工接受 Reviewer 语义意见，先核对已知样例所有事实、禁止程序错误，summary 记录 accepted_review_issues；产品页面不自动接受。browser_tested=false 明确表示没有测试 DOM 布局和浏览器点击。失败记录同样保留，前端流程通过不代表模型始终输出正确。
+
 本地开发默认记录模型调用，可设 `PM_LLM_TRACE_ENABLED=false` 关闭。`PM_TEST_ARTIFACTS_PATH` 可调整保存位置。记录含输入会议和原始模型结果，仅供本地排查，不经 HTTP 暴露；鉴权头不保存，配置中的真实密钥做文本替换。思考文本只可能存在于原始响应文件，不作为用户结果展示。
