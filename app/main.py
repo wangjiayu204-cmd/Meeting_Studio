@@ -16,6 +16,10 @@ from app.repositories.database import Database
 from app.repositories.meetings import MeetingRepository
 from app.services.meetings import MeetingService
 from app.llm.client import ModelClient
+from app.agents.meeting import MeetingAgents
+from app.api.planning import router as planning_router
+from app.repositories.planning import PlanningRepository
+from app.services.planning import PlanningService
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -26,7 +30,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(application: FastAPI):
         await run_in_threadpool(application.state.database.initialize)
         application.state.model_client = ModelClient(config)
-        logger.info("application_started phase=P3")
+        await run_in_threadpool(application.state.planning_repository.interrupt_active)
+        application.state.planning_service = PlanningService(
+            application.state.planning_repository, application.state.meeting_service,
+            MeetingAgents(application.state.model_client), config,
+        )
+        logger.info("application_started phase=P4")
         try:
             yield
         finally:
@@ -36,7 +45,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title=config.app_name,
         version=__version__,
-        description="轻量多 Agent 会议与任务管理。P3：文档、数据和 HTTP 模型适配。",
+        description="轻量多 Agent 会议与任务管理。P4：分析、规划、审核和版本化草稿。",
         lifespan=lifespan,
         responses={
             422: {"model": ErrorResponse, "description": "参数校验失败"},
@@ -45,6 +54,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = config
     app.state.database = Database(config.database_path)
+    app.state.planning_repository = PlanningRepository(app.state.database)
     app.state.meeting_service = MeetingService(MeetingRepository(app.state.database), config)
     register_error_handlers(app)
     # 为 JSON 转义及 multipart 元数据预留空间；文件仍执行独立字节限制。
@@ -69,4 +79,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router, prefix="/api")
     app.include_router(meetings_router, prefix="/api")
     app.include_router(model_router, prefix="/api")
+    app.include_router(planning_router, prefix="/api")
     return app

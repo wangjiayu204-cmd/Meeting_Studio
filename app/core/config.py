@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     max_upload_bytes: int = Field(default=10485760, gt=0)
     max_pdf_pages: int = Field(default=100, gt=0)
     max_revisions: int = Field(default=2, ge=0, le=10)
+    workflow_timeout: float = Field(default=900, gt=0, allow_inf_nan=False)
     max_concurrent_runs: int = Field(default=1, ge=1, le=16)
     database_path: Path = Path("data/pm.sqlite3")
     timezone: str = "Asia/Shanghai"

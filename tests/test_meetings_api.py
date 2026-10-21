@@ -124,7 +124,7 @@ def test_total_body_limit_including_chunked_transfer(client):
 
 def test_database_health_failure_is_explicit(client, config):
     with client.app.state.database.connection() as connection:
-        connection.execute("PRAGMA user_version = 2")
+        connection.execute("PRAGMA user_version = 999")
     response = client.get("/api/health")
     assert response.status_code == 503
     assert response.json()["error"]["code"] == "database_unavailable"

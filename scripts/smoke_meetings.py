@@ -23,7 +23,7 @@ from app.core.config import Settings
 
 @contextmanager
 def server(database_path: Path, log_path: Path, record: ArtifactRecord | None = None,
-           request_model_health: bool = False):
+           request_model_health: bool = False, request_timeout: float = 15):
     with socket.socket() as candidate:
         candidate.bind(("127.0.0.1", 0))
         port = candidate.getsockname()[1]
@@ -54,7 +54,7 @@ def server(database_path: Path, log_path: Path, record: ArtifactRecord | None = 
                     "request_id": response.headers.get("x-request-id"),
                     "response_body": response.text,
                 })
-            with httpx.Client(base_url=f"http://127.0.0.1:{port}", trust_env=False, timeout=15,
+            with httpx.Client(base_url=f"http://127.0.0.1:{port}", trust_env=False, timeout=request_timeout,
                               event_hooks={"response": [save_exchange]}) as client:
                 deadline = time.monotonic() + 15
                 while time.monotonic() < deadline:

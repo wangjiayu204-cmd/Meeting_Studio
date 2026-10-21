@@ -3,7 +3,7 @@ from pathlib import Path
 import sqlite3
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 class Database:
@@ -54,10 +54,34 @@ class Database:
                 """)
                 connection.execute("CREATE INDEX meetings_created ON meetings(created_at DESC, id DESC)")
                 connection.execute("PRAGMA user_version = 1")
+            if version < 2:
+                connection.execute("""CREATE TABLE runs (
+                    id TEXT PRIMARY KEY,
+                    meeting_id TEXT NOT NULL REFERENCES meetings(id),
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    body TEXT NOT NULL
+                )""")
+                connection.execute("""CREATE UNIQUE INDEX one_active_run ON runs(meeting_id)
+                    WHERE status IN ('queued', 'running')""")
+                connection.execute("""CREATE TABLE analyses (
+                    run_id TEXT PRIMARY KEY REFERENCES runs(id), body TEXT NOT NULL
+                )""")
+                connection.execute("""CREATE TABLE drafts (
+                    id TEXT PRIMARY KEY,
+                    meeting_id TEXT NOT NULL REFERENCES meetings(id),
+                    run_id TEXT NOT NULL REFERENCES runs(id),
+                    version INTEGER NOT NULL CHECK(version > 0),
+                    body TEXT NOT NULL,
+                    UNIQUE(meeting_id, version)
+                )""")
+                connection.execute("PRAGMA user_version = 2")
 
     def check(self) -> bool:
         with self.connection() as connection:
             version = connection.execute("PRAGMA user_version").fetchone()[0]
             connection.execute("SELECT id FROM meetings LIMIT 1").fetchall()
             connection.execute("SELECT id FROM paragraphs LIMIT 1").fetchall()
+            connection.execute("SELECT id FROM runs LIMIT 1").fetchall()
+            connection.execute("SELECT id FROM drafts LIMIT 1").fetchall()
             return version == SCHEMA_VERSION

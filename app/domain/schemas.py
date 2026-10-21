@@ -140,7 +140,7 @@ class Review(Contract):
     draft_version: int = Field(ge=1)
     approved: bool
     summary: str = Field(max_length=4000)
-    issues: list[ReviewIssue] = Field(default_factory=list, max_length=100)
+    issues: list[ReviewIssue] = Field(default_factory=list, max_length=5000)
     created_at: AwareDatetime = Field(default_factory=utc_now)
 
 
@@ -151,6 +151,7 @@ class Draft(Plan):
     version: int = Field(ge=1)
     status: DraftStatus = DraftStatus.pending_review
     review: Review | None = None
+    resolution_note: str = Field(default="", max_length=4000)
     created_at: AwareDatetime = Field(default_factory=utc_now)
 
     @model_validator(mode="after")
@@ -205,6 +206,10 @@ class Event(Contract):
 class DraftEdit(Plan):
     base_version: int = Field(ge=1)
     resolution_note: str = Field(default="", max_length=4000)
+
+
+class DraftReviewRequest(Contract):
+    draft_version: int = Field(ge=1)
 
 
 class ExecuteRequest(Contract):

@@ -39,7 +39,7 @@ def test_health_checks_database_without_requiring_model(app):
         response = client.get("/api/health")
         assert response.status_code == 200
         assert response.json() == {
-            "status": "ok", "version": "0.1.0", "phase": "P3",
+            "status": "ok", "version": "0.1.0", "phase": "P4",
             "database": "ok", "model": "not_checked",
         }
         assert len(response.headers["x-request-id"]) == 32
