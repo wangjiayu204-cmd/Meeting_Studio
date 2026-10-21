@@ -8,6 +8,7 @@ from app.domain.validation import require_executable
 from app.repositories.database import Database
 from app.repositories.meetings import MeetingRepository
 from app.repositories.planning import PlanningRepository
+from app.repositories.events import EventRepository
 
 
 class TaskRepository:
@@ -27,7 +28,7 @@ class TaskRepository:
                 raise AppError("execution_not_found", "该会议尚无执行记录", 404)
             return result
 
-    def claim(self, meeting: Meeting, request: ExecuteRequest):
+    def claim(self, meeting: Meeting, request: ExecuteRequest, *, queued=False):
         from app.domain.schemas import Run
         with self.database.connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -44,9 +45,12 @@ class TaskRepository:
             self.planning._assert_idle(connection, meeting.id)
             require_executable(meeting, draft)
             run = Run(meeting_id=meeting.id, type=RunType.execution,
-                      status=RunStatus.running, started_at=utc_now())
+                      status=RunStatus.queued if queued else RunStatus.running,
+                      started_at=None if queued else utc_now())
             connection.execute("INSERT INTO runs VALUES (?, ?, ?, ?, ?)", (
                 run.id, meeting.id, run.status.value, run.created_at.isoformat(), run.model_dump_json()))
+            EventRepository.insert(connection, run.id, "run_queued" if queued else "run_started",
+                                   "执行已排队" if queued else "执行开始", payload={"type": "execution"})
             execution = Execution(
                 id=existing.id if existing else new_id(), meeting_id=meeting.id,
                 draft_id=draft.id, draft_version=draft.version, run_id=run.id,
@@ -99,6 +103,9 @@ class TaskRepository:
             connection.execute("INSERT INTO tool_calls VALUES (?, ?, ?, ?, ?, ?)", (
                 new_id(), execution.id, context.run_id, "create_tasks", utc_now().isoformat(),
                 json.dumps(result, ensure_ascii=False)))
+            EventRepository.insert(connection, run.id, "tool_result", "看板任务创建成功", "executor", result)
+            EventRepository.insert(connection, run.id, "run_completed", "执行完成",
+                                   payload={"execution_id": execution.id, "task_count": len(tasks)})
         return execution
 
     @staticmethod
@@ -121,10 +128,14 @@ class TaskRepository:
             connection.execute("UPDATE executions SET status=?, body=? WHERE id=?",
                                (execution.status.value, execution.model_dump_json(), execution.id))
             run = self.planning._get_run(connection, run_id)
-            run.status, run.finished_at = RunStatus.failed, utc_now()
+            run.status = RunStatus.interrupted if code == "execution_cancelled" else RunStatus.failed
+            run.finished_at = utc_now()
             run.error_code, run.error_message = code, message
             connection.execute("UPDATE runs SET status=?, body=? WHERE id=?",
                                (run.status.value, run.model_dump_json(), run.id))
+            EventRepository.insert(connection, run.id,
+                                   "run_interrupted" if run.status == RunStatus.interrupted else "run_failed", message,
+                                   payload={"error_code": code, "execution_id": execution.id})
 
     def interrupt_pending(self):
         with self.database.connection() as connection:

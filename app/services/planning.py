@@ -11,6 +11,7 @@ from app.domain.schemas import (AcceptIssuesRequest, Analysis, Draft, DraftEdit,
 from app.domain.states import DraftStatus, RunStatus, RunType
 from app.domain.validation import merge_review, validate_plan
 from app.repositories.planning import PlanningRepository
+from app.repositories.events import EventRepository
 from app.services.meetings import MeetingService
 from app.workflows.analysis import build_analysis_graph
 
@@ -20,6 +21,11 @@ class PlanningService:
                  agents: MeetingAgents, settings: Settings):
         self.repository, self.meetings = repository, meetings
         self.agents, self.settings = agents, settings
+        self.events = EventRepository(repository.database)
+
+    async def perform_prepared(self, run):
+        meeting = await run_in_threadpool(self.meetings.get, run.meeting_id)
+        return await self._perform(run, meeting, review_only=run.type == RunType.review)
 
     async def analyze(self, meeting_id: str) -> Draft:
         meeting = await run_in_threadpool(self.meetings.get, meeting_id)
@@ -46,6 +52,10 @@ class PlanningService:
 
             async def observe(role, state, metadata):
                 nonlocal latest, revision, step
+                if role.endswith("_started"):
+                    await run_in_threadpool(self.events.append, run.id, "agent_started",
+                                            "角色开始处理", role.removesuffix("_started"))
+                    return
                 step += 1
                 revision = state.get("revision", 0)
                 record.write(f"{step:02d}_{role}.json", {
@@ -64,6 +74,13 @@ class PlanningService:
                                       resolution_note=state.get("resolution_note", ""))
                     latest = await run_in_threadpool(self.repository.save_draft, candidate)
                     record.write(f"{step:02d}_draft.json", latest.model_dump(mode="json"))
+                await run_in_threadpool(self.events.append, run.id, "agent_completed", "角色处理完成", role,
+                                        {**metadata, "revision": revision,
+                                         "draft_version": latest.version if latest else None})
+                if role == "reviewer":
+                    await run_in_threadpool(self.events.append, run.id, "review_feedback", "审核结果已保存", role,
+                                            {"draft_version": latest.version, "approved": latest.review.approved,
+                                             "issue_count": len(latest.review.issues), "status": latest.status.value})
 
             async def perform():
                 if review_only:
@@ -72,6 +89,7 @@ class PlanningService:
                     analysis = analysis or Analysis(summary="用户编辑草稿复核")
                     plan = Plan(tasks=current.tasks)
                     program = validate_plan(meeting, plan)
+                    await observe("reviewer_started", {}, {})
                     result = await self.agents.review(meeting, analysis, plan, program)
                     review = merge_review(plan, program, result.value)
                     await observe("reviewer", {"analysis": analysis, "plan": plan, "review": review,

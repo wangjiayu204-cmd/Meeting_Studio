@@ -24,6 +24,9 @@ from app.agents.executor import ExecutorAgent
 from app.api.tasks import router as tasks_router
 from app.repositories.tasks import TaskRepository
 from app.services.execution import ExecutionService
+from app.services.runs import RunManager
+from app.repositories.events import EventRepository
+from app.api.runs import router as runs_router
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -44,17 +47,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             application.state.task_repository, application.state.meeting_service,
             ExecutorAgent(application.state.model_client), config,
         )
-        logger.info("application_started phase=P5")
+        application.state.run_manager = RunManager(application.state.planning_service,
+                                                   application.state.execution_service, config)
+        logger.info("application_started phase=P6")
         try:
             yield
         finally:
+            await application.state.run_manager.close()
             await application.state.model_client.aclose()
             logger.info("application_stopped")
 
     app = FastAPI(
         title=config.app_name,
         version=__version__,
-        description="轻量多 Agent 会议与任务管理。P5：确认执行、工具调用和持久化看板。",
+        description="轻量多 Agent 会议与任务管理。P6：后台队列、持久化事件与 SSE。",
         lifespan=lifespan,
         responses={
             422: {"model": ErrorResponse, "description": "参数校验失败"},
@@ -65,6 +71,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.database = Database(config.database_path)
     app.state.planning_repository = PlanningRepository(app.state.database)
     app.state.task_repository = TaskRepository(app.state.database)
+    app.state.event_repository = EventRepository(app.state.database)
     app.state.meeting_service = MeetingService(MeetingRepository(app.state.database), config)
     register_error_handlers(app)
     # 为 JSON 转义及 multipart 元数据预留空间；文件仍执行独立字节限制。
@@ -91,4 +98,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(model_router, prefix="/api")
     app.include_router(planning_router, prefix="/api")
     app.include_router(tasks_router, prefix="/api")
+    app.include_router(runs_router, prefix="/api")
     return app

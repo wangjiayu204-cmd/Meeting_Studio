@@ -277,7 +277,7 @@ def test_trace_write_failure_after_commit_does_not_report_execution_failed(bundl
 def test_database_v2_upgrade_preserves_planning_data(bundle):
     _, database, sample, planning, _, draft, repo, _, _ = bundle
     with database.connection() as connection:
-        for table in ("tool_calls", "tasks", "executions"):
+        for table in ("run_requests", "events", "tool_calls", "tasks", "executions"):
             connection.execute(f"DROP TABLE {table}")
         connection.execute("PRAGMA user_version=2")
     database.initialize()

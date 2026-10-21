@@ -42,6 +42,8 @@ class AgentRole(str, Enum):
 
 
 class EventType(str, Enum):
+    run_queued = "run_queued"
+    run_interrupted = "run_interrupted"
     run_started = "run_started"
     agent_started = "agent_started"
     agent_completed = "agent_completed"

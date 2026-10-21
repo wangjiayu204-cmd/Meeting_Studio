@@ -34,4 +34,6 @@ test_artifacts/
 
 `python scripts/smoke_execution.py` 测试四角色、真实任务工具与看板：API 目录保留 01_reviewed_draft.json、02_execution.json、03_board.json，以及各次 HTTP 交换和重启日志。workflows 的 execution 目录保存 01_executor.json（模型 trace_id / 工具选择）与 02_tool_result.json（实际落库结果），按 run_id 关联。数据库中也保存工具调用成功记录；模型输出不作为执行成功证据。
 
+`python scripts/smoke_runs.py` 验证后台提交与 SSE 真正流式接收：01_disconnected_events.json 保存主动断线前事件，02_reconnected_events.json 保存 Last-Event-ID 补读，04_execution_events.json 保存 Executor 与工具事件，05_full_replay / 06_restart_replay 用于对照全量和重启重放。每次收到事件即更新文件；summary.json 汇总事件数与运行 ID。SSE 不使用会一次读完正文的普通 HTTP 测试 hook。
+
 本地开发默认记录模型调用，可设 `PM_LLM_TRACE_ENABLED=false` 关闭。`PM_TEST_ARTIFACTS_PATH` 可调整保存位置。记录含输入会议和原始模型结果，仅供本地排查，不经 HTTP 暴露；鉴权头不保存，配置中的真实密钥做文本替换。思考文本只可能存在于原始响应文件，不作为用户结果展示。

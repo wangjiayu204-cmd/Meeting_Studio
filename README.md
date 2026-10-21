@@ -1,6 +1,6 @@
 # 智能会议与任务闭环管理
 
-当前完成 **P5：执行与看板**。包含四角色链路、审核问题逐条接受、明确确认、白名单工具调用、任务原子落库、防重复创建及看板状态接口。后台调度、SSE、导出与前端按后续阶段交付。
+当前完成 **P6：后台运行与实时进度**。包含四角色链路、审核草稿、确认执行、看板、有限后台队列、持久化事件、SSE 补读与失败重试。导出和前端按后续阶段交付。
 
 实施步骤见 [模块化实施方案.md](模块化实施方案.md)。
 
@@ -37,7 +37,7 @@ PM_PORT=8081 bash scripts/run.sh
 
 模型地址默认 `http://127.0.0.1:8000/v1`，名称 `qwen3-8b`。切换 DCU 修改 `PM_LLM_BASE_URL` 和必要的鉴权。HTTPX 使用 `trust_env=False`，模型请求直接访问配置地址，不读取环境代理。启动只创建客户端，不自动请求模型；模型离线不影响历史会议查询。
 
-数据库相对路径始终基于项目根目录解析，不随启动目录变化。启动自动初始化 `data/pm.sqlite3`，启用外键和 WAL，以 `PRAGMA user_version` 管理版本；当前 v3，在已有 v1 / v2 上自动升级，保留会议和草稿，新增执行、任务及工具记录。遇到高于支持版本的数据库拒绝启动。升级前停服备份；回退至旧代码前须同时恢复对应版本数据库备份。数据库不提交 Git。日志只记录基础状态与请求 ID，不输出模型密钥或完整会议内容。
+数据库相对路径始终基于项目根目录解析，不随启动目录变化。启动自动初始化 `data/pm.sqlite3`，启用外键和 WAL，以 `PRAGMA user_version` 管理版本；当前 v4，在已有 v1 / v2 / v3 上自动升级，保留已有数据，新增事件和后台请求记录。遇到高于支持版本的数据库拒绝启动。升级前停服备份；回退至旧代码前须同时恢复对应版本数据库备份。数据库不提交 Git。日志只记录基础状态与请求 ID，不输出模型密钥或完整会议内容。
 
 ## 会议接口
 
@@ -87,7 +87,7 @@ curl --noproxy '*' http://127.0.0.1:8080/api/meetings/upload \
 | `POST /api/meetings/{id}/draft/review` | 提交 draft_version，对当前草稿重新审核并产生新版本 |
 | `GET /api/runs/{id}` | 查看成功、失败、中断及返工次数 |
 
-P4 分析与复核在当前 HTTP 请求内异步等待，HTTP 成功为 200；运行记录持久化，响应中草稿附 run_id。P6 再提供返回 202 的后台调度和 SSE，当前不要调用尚未实现的 `POST /runs`。
+原有分析与复核接口仍在当前 HTTP 请求内异步等待，HTTP 成功为 200，响应草稿附 run_id。推荐页面和长任务使用 P6 后台接口，立即获得 202 和 run_id，再监听 SSE；两种入口共享会议锁和持久化事件。
 
 ```bash
 curl --noproxy '*' --max-time 930 -X POST \
@@ -153,6 +153,53 @@ python scripts/smoke_execution.py
 
 该脚本通过真实模型完成三角色审核和 Executor 工具选择，验证两项任务、旧版阻止、重复确认、状态更新及重启保留。中间产物保存在 `test_artifacts/api/..._execution_smoke/`，包含 reviewed_draft、execution 和 board；`test_artifacts/workflows/..._execution/` 包含 Executor 关联 trace_id 与真实工具结果。
 
+## 后台运行、SSE 与重试
+
+| 接口 | 用途 |
+|---|---|
+| `POST /api/meetings/{id}/runs` | 提交分析 / 复核 / 执行，返回 202 和 Run |
+| `GET /api/meetings/{id}/runs?limit=20&offset=0` | 分页查看会议运行历史（数组） |
+| `GET /api/runs/{id}` | 查询 queued / running / succeeded / failed / interrupted |
+| `GET /api/runs/{id}/events` | SSE，补读持久化事件并等待新事件 |
+| `POST /api/runs/{id}/retry` | 为失败 / 中断的后台运行创建新 run_id |
+
+三种提交正文：
+
+```json
+{"type":"analysis"}
+```
+
+```json
+{"type":"review","draft_version":3}
+```
+
+```json
+{"type":"execution","draft_version":4,"confirm":true,"acknowledgement":"已核对，确认创建任务"}
+```
+
+返回时运行先持久化为 queued，工作线程槽可用后变为 running；同一会议最多一个活跃运行，重复提交返回 409。执行已成功时重复提交返回原 run_id，HTTP 仍为 202，不再创建任务。队列含正在运行项，默认上限 `PM_MAX_PENDING_RUNS=20`，满时返回 503；后台同时运行数为 `PM_MAX_CONCURRENT_RUNS=1`，原等待式入口也受模型客户端并发限制。
+
+```bash
+curl --noproxy '*' -X POST http://127.0.0.1:8080/api/meetings/会议ID/runs \
+  -H 'Content-Type: application/json' -d '{"type":"analysis"}'
+
+curl --noproxy '*' -N http://127.0.0.1:8080/api/runs/运行ID/events
+```
+
+SSE 事件有递增 id，类型包括 run_queued、run_started、agent_started、agent_completed、review_feedback、tool_result、run_completed、run_failed 和 run_interrupted。data 为 Event JSON，不包含模型内部思考。终态事件与运行状态在同一事务写入；连接在补读完成且运行终止后关闭。运行成功不等于草稿 ready，页面需读取草稿审核状态。
+
+断开 SSE 不会取消后台工作。重连使用 `Last-Event-ID: 上次ID` 或 `?after=上次ID`；两者同时存在取较大值，只返回更大的 ID。事件 ID 为全库递增，不必连续。默认轮询 0.3 秒、空闲心跳 10 秒，可通过 `PM_SSE_POLL_INTERVAL` 和 `PM_SSE_HEARTBEAT_SECONDS` 调整。浏览器 EventSource 监听具名事件，收到终态应主动 close，避免自动重连。
+
+重试分析 / 复核正文为 `{}`。执行重试必须重新给出 `{"confirm":true,"acknowledgement":"再次核对并确认"}`，不会自动复用上次授权。复核 / 执行保留原草稿版本，期间已编辑则返回 409，需通过新版本重新提交。只允许失败或中断重试；原有等待式入口无后台请求记录，失败后通过原入口重新调用。
+
+队列属于单进程内存调度，运行和事件持久化。服务停止会取消未完成工作并标记 interrupted，启动也会处理崩溃残留；不会自动继续执行，需显式重试。已原子提交的执行保留 succeeded，不因停服或重复连接撤回。始终使用单 Uvicorn worker。
+
+```bash
+python scripts/smoke_runs.py
+```
+
+真实验证会主动断开并重连 SSE，对比补读事件，完成后台分析和执行，重启后再验证事件重放与任务保留。全过程留在 `test_artifacts/api/..._runs_smoke/`。
+
 ## 模型调用与中间测试记录
 
 `GET /api/model/health` 检查 `/v1/models` 是否包含配置的模型名称，正常时返回 model、latency_ms 和 trace_id；它不代表推理效果测试。真实推理请运行：
@@ -206,6 +253,7 @@ python scripts/smoke_meetings.py
 python scripts/smoke_model.py
 python scripts/smoke_planning.py
 python scripts/smoke_execution.py
+python scripts/smoke_runs.py
 ```
 
 `pytest` 离线执行，无需模型服务，数据库与模型记录使用测试临时目录；包含 PDF、SQLite 事务、模型客户端受控响应和失败边界验证。`smoke_meetings.py` 使用真实临时服务检查会议接口及重启持久化，不请求模型；`smoke_model.py` 需要真实 vLLM。两个脚本都保留记录在 test_artifacts 下。依赖声明在 `requirements.txt`；验收全项目后再生成环境快照。

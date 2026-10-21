@@ -21,6 +21,7 @@ Observer = Callable[[str, AnalysisState, dict], Awaitable[None]]
 
 def build_analysis_graph(agents: MeetingAgents, max_revisions: int, observer: Observer):
     async def manager(state):
+        await observer("manager_started", state, {})
         result = await agents.analyze(state["meeting"])
         issues = validate_analysis(state["meeting"], result.value)
         if issues:
@@ -30,6 +31,7 @@ def build_analysis_graph(agents: MeetingAgents, max_revisions: int, observer: Ob
         return update
 
     async def planner(state):
+        await observer("planner_started", state, {})
         result = await agents.plan(state["meeting"], state["analysis"],
                                    state.get("plan"), state.get("review"))
         revision = state.get("revision", -1) + 1
@@ -42,6 +44,7 @@ def build_analysis_graph(agents: MeetingAgents, max_revisions: int, observer: Ob
         return update
 
     async def reviewer(state):
+        await observer("reviewer_started", state, {})
         program = validate_plan(state["meeting"], state["plan"])
         result = await agents.review(state["meeting"], state["analysis"], state["plan"], program)
         review = merge_review(state["plan"], program, result.value)

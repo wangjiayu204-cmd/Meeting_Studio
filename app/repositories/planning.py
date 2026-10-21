@@ -2,6 +2,7 @@ from app.core.errors import AppError
 from app.domain.schemas import Analysis, Draft, Run, utc_now
 from app.domain.states import RunStatus, RunType
 from app.repositories.database import Database
+from app.repositories.events import EventRepository
 
 
 class PlanningRepository:
@@ -36,18 +37,23 @@ class PlanningRepository:
             raise AppError("meeting_already_executed", "会议任务已经确认执行，首版不支持重新规划", 409)
 
     def start(self, meeting_id: str, run_type: RunType,
-              expected_version: int | None = None) -> Run:
+              expected_version: int | None = None, *, queued=False) -> Run:
         with self.database.connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             if not connection.execute("SELECT id FROM meetings WHERE id=?", (meeting_id,)).fetchone():
                 raise AppError("meeting_not_found", "会议不存在", 404)
             self._assert_idle(connection, meeting_id)
             latest = self._latest(connection, meeting_id)
+            if run_type == RunType.review and latest is None:
+                raise AppError("draft_not_found", "尚无草稿可供复核", 404)
             self._version(latest, expected_version if expected_version is not None else (latest.version if latest else 0))
             run = Run(meeting_id=meeting_id, type=run_type,
-                      status=RunStatus.running, started_at=utc_now())
+                      status=RunStatus.queued if queued else RunStatus.running,
+                      started_at=None if queued else utc_now())
             connection.execute("INSERT INTO runs VALUES (?, ?, ?, ?, ?)", (
                 run.id, meeting_id, run.status.value, run.created_at.isoformat(), run.model_dump_json()))
+            EventRepository.insert(connection, run.id, "run_queued" if queued else "run_started",
+                                   "运行已排队" if queued else "运行开始", payload={"type": run_type.value})
         return run
 
     def finish(self, run_id: str, status: RunStatus, revision_count=0,
@@ -55,12 +61,19 @@ class PlanningRepository:
         with self.database.connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             run = self._get_run(connection, run_id)
+            if run.status not in {RunStatus.queued, RunStatus.running}:
+                return run
             run.status = status
             run.finished_at = utc_now()
             run.revision_count = revision_count
             run.error_code, run.error_message = error_code, error_message
             connection.execute("UPDATE runs SET status=?, body=? WHERE id=?",
                                (status.value, run.model_dump_json(), run.id))
+            event_type = {RunStatus.succeeded: "run_completed", RunStatus.failed: "run_failed",
+                          RunStatus.interrupted: "run_interrupted"}[status]
+            EventRepository.insert(connection, run.id, event_type,
+                                   "运行完成" if status == RunStatus.succeeded else (error_message or "运行中断"),
+                                   payload={"status": status.value, "error_code": error_code})
         return run
 
     @staticmethod
@@ -124,3 +137,18 @@ class PlanningRepository:
                 run.error_message = "运行被应用重启中断，请重新发起"
                 connection.execute("UPDATE runs SET status=?, body=? WHERE id=?",
                                    (run.status.value, run.model_dump_json(), run.id))
+                EventRepository.insert(connection, run.id, "run_interrupted", run.error_message,
+                                       payload={"error_code": run.error_code})
+
+    def mark_running(self, run_id: str) -> Run:
+        with self.database.connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            run = self._get_run(connection, run_id)
+            if run.status != RunStatus.queued:
+                raise AppError("run_not_queued", "运行已经开始或结束", 409)
+            run.status, run.started_at = RunStatus.running, utc_now()
+            connection.execute("UPDATE runs SET status=?,body=? WHERE id=?",
+                               (run.status.value, run.model_dump_json(), run_id))
+            EventRepository.insert(connection, run_id, "run_started", "后台运行开始",
+                                   payload={"type": run.type.value})
+            return run

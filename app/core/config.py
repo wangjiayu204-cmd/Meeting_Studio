@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     max_revisions: int = Field(default=2, ge=0, le=10)
     workflow_timeout: float = Field(default=900, gt=0, allow_inf_nan=False)
     max_concurrent_runs: int = Field(default=1, ge=1, le=16)
+    max_pending_runs: int = Field(default=20, ge=1, le=1000)
+    sse_poll_interval: float = Field(default=0.3, gt=0, le=10, allow_inf_nan=False)
+    sse_heartbeat_seconds: float = Field(default=10, gt=0, le=60, allow_inf_nan=False)
     database_path: Path = Path("data/pm.sqlite3")
     timezone: str = "Asia/Shanghai"
 

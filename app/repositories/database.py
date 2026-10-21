@@ -3,7 +3,7 @@ from pathlib import Path
 import sqlite3
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 class Database:
@@ -106,6 +106,25 @@ class Database:
                     body TEXT NOT NULL
                 )""")
                 connection.execute("PRAGMA user_version = 3")
+            if version < 4:
+                connection.execute("""CREATE TABLE events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id TEXT NOT NULL REFERENCES runs(id),
+                    type TEXT NOT NULL,
+                    agent TEXT,
+                    message TEXT NOT NULL,
+                    payload TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )""")
+                connection.execute("CREATE INDEX events_run_id ON events(run_id,id)")
+                connection.execute("""CREATE UNIQUE INDEX one_terminal_event ON events(run_id)
+                    WHERE type IN ('run_completed','run_failed','run_interrupted')""")
+                connection.execute("""CREATE TABLE run_requests (
+                    run_id TEXT PRIMARY KEY REFERENCES runs(id),
+                    body TEXT NOT NULL,
+                    retry_of TEXT REFERENCES runs(id)
+                )""")
+                connection.execute("PRAGMA user_version = 4")
 
     def check(self) -> bool:
         with self.connection() as connection:
@@ -117,4 +136,6 @@ class Database:
             connection.execute("SELECT id FROM executions LIMIT 1").fetchall()
             connection.execute("SELECT id FROM tasks LIMIT 1").fetchall()
             connection.execute("SELECT id FROM tool_calls LIMIT 1").fetchall()
+            connection.execute("SELECT id FROM events LIMIT 1").fetchall()
+            connection.execute("SELECT run_id FROM run_requests LIMIT 1").fetchall()
             return version == SCHEMA_VERSION

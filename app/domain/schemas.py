@@ -249,3 +249,27 @@ class IssueAcceptance(Contract):
 class AcceptIssuesRequest(Contract):
     draft_version: int = Field(ge=1)
     resolutions: list[IssueAcceptance] = Field(min_length=1, max_length=500)
+
+
+class AnalysisSubmission(Contract):
+    type: Literal["analysis"] = "analysis"
+
+
+class ReviewSubmission(Contract):
+    type: Literal["review"]
+    draft_version: int = Field(ge=1)
+
+
+class ExecutionSubmission(ExecuteRequest):
+    type: Literal["execution"]
+
+
+RunSubmission = Annotated[
+    AnalysisSubmission | ReviewSubmission | ExecutionSubmission,
+    Field(discriminator="type"),
+]
+
+
+class RunRetryRequest(Contract):
+    confirm: bool = Field(default=False, strict=True)
+    acknowledgement: str = Field(default="", max_length=4000)
