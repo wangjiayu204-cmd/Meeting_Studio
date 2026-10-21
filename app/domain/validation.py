@@ -3,7 +3,9 @@
 from collections import Counter
 import re
 
-from app.domain.schemas import Analysis, Meeting, Plan, Review, ReviewIssue
+from app.core.errors import AppError
+from app.domain.schemas import Analysis, Draft, Meeting, Plan, Review, ReviewIssue
+from app.domain.states import DraftStatus
 
 
 def validate_analysis(meeting: Meeting, analysis: Analysis) -> list[ReviewIssue]:
@@ -94,3 +96,20 @@ def merge_review(plan: Plan, program_issues: list[ReviewIssue], verdict) -> Revi
         issues.append(ReviewIssue(message="Reviewer 未通过：" + verdict.summary, origin="reviewer"))
     return Review(draft_version=1, approved=verdict.approved and not issues,
                   summary=verdict.summary, issues=issues)
+
+
+def require_executable(meeting: Meeting, draft: Draft) -> None:
+    if draft.status != DraftStatus.ready or draft.review is None:
+        raise AppError("draft_not_ready", "草稿必须完成复核并处理审核问题后才能执行", 409)
+    if draft.review.draft_version != draft.version or not draft.review.approved:
+        raise AppError("review_not_approved", "当前草稿未通过审核", 409)
+    if any(issue.status == "open" for issue in draft.review.issues):
+        raise AppError("unresolved_review_issues", "仍有未处理审核问题", 409)
+    # 接受语义意见不能绕过客观的引用、依赖等硬错误。
+    hard = [i for i in validate_plan(meeting, Plan(tasks=draft.tasks)) if i.severity == "error"]
+    if hard:
+        raise AppError("plan_validation_failed", "任务存在禁止执行的校验错误", 409,
+                       [{"task_ref": i.task_ref, "message": i.message} for i in hard])
+    if any(i.origin == "program" and i.severity == "error" and i.status == "accepted"
+           for i in draft.review.issues):
+        raise AppError("hard_error_not_acceptable", "程序硬错误不能被人工接受", 409)

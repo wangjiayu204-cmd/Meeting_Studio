@@ -27,7 +27,7 @@ def test_restart_and_sqlite_constraints(tmp_path):
     with restarted.connection() as connection:
         assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
         assert connection.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 3
         with pytest.raises(sqlite3.IntegrityError):
             connection.execute("INSERT INTO paragraphs VALUES (?, ?, ?, ?)", ("missing", "p0001", 0, "text"))
 

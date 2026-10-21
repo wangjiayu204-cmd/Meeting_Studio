@@ -6,7 +6,8 @@ from app.agents.meeting import MeetingAgents
 from app.core.artifacts import ArtifactRecord
 from app.core.config import Settings
 from app.core.errors import AppError
-from app.domain.schemas import Analysis, Draft, DraftEdit, FieldEvidence, Plan, Review
+from app.domain.schemas import (AcceptIssuesRequest, Analysis, Draft, DraftEdit,
+                                FieldEvidence, Plan, Review, new_id, utc_now)
 from app.domain.states import DraftStatus, RunStatus, RunType
 from app.domain.validation import merge_review, validate_plan
 from app.repositories.planning import PlanningRepository
@@ -142,3 +143,28 @@ class PlanningService:
         draft = Draft(meeting_id=meeting_id, run_id=current.run_id, version=1, tasks=tasks,
                       status=DraftStatus.pending_review, review=review, resolution_note=edit.resolution_note)
         return self.repository.save_draft(draft, expected_version=edit.base_version, require_idle=True)
+
+    def accept_issues(self, meeting_id: str, data: AcceptIssuesRequest) -> Draft:
+        current = self.get_draft(meeting_id)
+        if current.version != data.draft_version:
+            raise AppError("draft_version_conflict", "草稿版本已更新，请刷新", 409)
+        if current.status not in {DraftStatus.needs_attention, DraftStatus.ready} or current.review is None:
+            raise AppError("draft_not_reviewed", "请先完成当前草稿的 Reviewer 复核", 409)
+        requested = {resolution.issue_id: resolution.note for resolution in data.resolutions}
+        if len(requested) != len(data.resolutions):
+            raise AppError("duplicate_issue_resolution", "问题 ID 重复", 422)
+        review = current.review.model_copy(deep=True)
+        issues = {issue.id: issue for issue in review.issues}
+        for issue_id, note in requested.items():
+            issue = issues.get(issue_id)
+            if issue is None or issue.status != "open":
+                raise AppError("review_issue_not_open", "问题不存在或已经处理，请刷新", 409)
+            if issue.origin == "program" and issue.severity == "error":
+                raise AppError("hard_error_not_acceptable", "程序硬错误必须修正，不能直接接受", 409)
+            issue.status, issue.resolution_note = "accepted", note
+        review.approved = not any(issue.status == "open" for issue in review.issues)
+        draft = current.model_copy(update={
+            "id": new_id(), "created_at": utc_now(), "review": review,
+            "status": DraftStatus.ready if review.approved else DraftStatus.needs_attention,
+        })
+        return self.repository.save_draft(draft, expected_version=data.draft_version, require_idle=True)

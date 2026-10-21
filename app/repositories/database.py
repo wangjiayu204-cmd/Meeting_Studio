@@ -3,7 +3,7 @@ from pathlib import Path
 import sqlite3
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 class Database:
@@ -76,6 +76,36 @@ class Database:
                     UNIQUE(meeting_id, version)
                 )""")
                 connection.execute("PRAGMA user_version = 2")
+            if version < 3:
+                connection.execute("""CREATE TABLE executions (
+                    id TEXT PRIMARY KEY,
+                    meeting_id TEXT NOT NULL UNIQUE REFERENCES meetings(id),
+                    draft_id TEXT NOT NULL REFERENCES drafts(id),
+                    run_id TEXT NOT NULL REFERENCES runs(id),
+                    status TEXT NOT NULL CHECK(status IN ('pending','succeeded','failed')),
+                    body TEXT NOT NULL
+                )""")
+                connection.execute("""CREATE TABLE tasks (
+                    id TEXT PRIMARY KEY,
+                    meeting_id TEXT NOT NULL REFERENCES meetings(id),
+                    draft_id TEXT NOT NULL REFERENCES drafts(id),
+                    local_id TEXT NOT NULL,
+                    status TEXT NOT NULL CHECK(status IN ('todo','in_progress','done')),
+                    owner TEXT,
+                    created_at TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    UNIQUE(meeting_id, local_id)
+                )""")
+                connection.execute("CREATE INDEX tasks_board ON tasks(meeting_id,status,created_at DESC)")
+                connection.execute("""CREATE TABLE tool_calls (
+                    id TEXT PRIMARY KEY,
+                    execution_id TEXT NOT NULL UNIQUE REFERENCES executions(id),
+                    run_id TEXT NOT NULL REFERENCES runs(id),
+                    tool_name TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    body TEXT NOT NULL
+                )""")
+                connection.execute("PRAGMA user_version = 3")
 
     def check(self) -> bool:
         with self.connection() as connection:
@@ -84,4 +114,7 @@ class Database:
             connection.execute("SELECT id FROM paragraphs LIMIT 1").fetchall()
             connection.execute("SELECT id FROM runs LIMIT 1").fetchall()
             connection.execute("SELECT id FROM drafts LIMIT 1").fetchall()
+            connection.execute("SELECT id FROM executions LIMIT 1").fetchall()
+            connection.execute("SELECT id FROM tasks LIMIT 1").fetchall()
+            connection.execute("SELECT id FROM tool_calls LIMIT 1").fetchall()
             return version == SCHEMA_VERSION

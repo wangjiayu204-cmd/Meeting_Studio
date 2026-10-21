@@ -187,10 +187,15 @@ class Execution(Contract):
     id: str = Field(default_factory=new_id)
     meeting_id: NonEmpty
     draft_version: int = Field(ge=1)
+    draft_id: str | None = None
+    run_id: str | None = None
     status: ExecutionStatus = ExecutionStatus.pending
     task_ids: list[str] = Field(default_factory=list)
     error_message: str | None = None
+    acknowledgement: str = Field(default="", max_length=4000)
+    tool_name: str | None = None
     created_at: AwareDatetime = Field(default_factory=utc_now)
+    finished_at: AwareDatetime | None = None
 
 
 class Event(Contract):
@@ -227,3 +232,20 @@ class ExecuteRequest(Contract):
 
 class TaskUpdate(Contract):
     status: TaskStatus
+
+
+class TaskPage(Contract):
+    items: list[Task]
+    total: int = Field(ge=0)
+    limit: int = Field(ge=1, le=100)
+    offset: int = Field(ge=0)
+
+
+class IssueAcceptance(Contract):
+    issue_id: NonEmpty
+    note: NonEmpty = Field(max_length=2000)
+
+
+class AcceptIssuesRequest(Contract):
+    draft_version: int = Field(ge=1)
+    resolutions: list[IssueAcceptance] = Field(min_length=1, max_length=500)

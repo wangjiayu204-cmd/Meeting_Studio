@@ -1,6 +1,6 @@
 # 智能会议与任务闭环管理
 
-当前完成 **P4：分析与审核**。包含 Manager / Planner / Reviewer 的 LangGraph 工作流、程序校验、有限返工、持久化草稿版本与人工编辑复核。Executor、看板、后台调度、SSE 与前端按后续阶段交付。
+当前完成 **P5：执行与看板**。包含四角色链路、审核问题逐条接受、明确确认、白名单工具调用、任务原子落库、防重复创建及看板状态接口。后台调度、SSE、导出与前端按后续阶段交付。
 
 实施步骤见 [模块化实施方案.md](模块化实施方案.md)。
 
@@ -37,7 +37,7 @@ PM_PORT=8081 bash scripts/run.sh
 
 模型地址默认 `http://127.0.0.1:8000/v1`，名称 `qwen3-8b`。切换 DCU 修改 `PM_LLM_BASE_URL` 和必要的鉴权。HTTPX 使用 `trust_env=False`，模型请求直接访问配置地址，不读取环境代理。启动只创建客户端，不自动请求模型；模型离线不影响历史会议查询。
 
-数据库相对路径始终基于项目根目录解析，不随启动目录变化。启动自动初始化 `data/pm.sqlite3`，启用外键和 WAL，以 `PRAGMA user_version` 管理版本；当前 v2，在已有 v1 上自动新增运行、分析和草稿表，保留会议数据。遇到高于支持版本的数据库拒绝启动。升级前停服备份；代码回退至 P2 前须同时恢复 v1 数据库备份。数据库不提交 Git。日志只记录基础状态与请求 ID，不输出模型密钥或完整会议内容。
+数据库相对路径始终基于项目根目录解析，不随启动目录变化。启动自动初始化 `data/pm.sqlite3`，启用外键和 WAL，以 `PRAGMA user_version` 管理版本；当前 v3，在已有 v1 / v2 上自动升级，保留会议和草稿，新增执行、任务及工具记录。遇到高于支持版本的数据库拒绝启动。升级前停服备份；回退至旧代码前须同时恢复对应版本数据库备份。数据库不提交 Git。日志只记录基础状态与请求 ID，不输出模型密钥或完整会议内容。
 
 ## 会议接口
 
@@ -96,7 +96,7 @@ curl --noproxy '*' --max-time 930 -X POST \
 
 Manager 提取议题和决议；Planner 生成任务及来源；程序验证引用、ID、缺失依据、日期与依赖图；Reviewer 对照原文作语义审核。有需修正问题时最多返工 `PM_MAX_REVISIONS=2` 次。整体限时 `PM_WORKFLOW_TIMEOUT=900` 秒。单次模型调用仍受自身时间预算限制。
 
-每次 Planner 输出先存为 pending_review，每次审核结果新增版本，因此最终版本不一定为 1。状态 ready 表示程序和语义审核均通过；needs_attention 表示仍需人工处理；运行 succeeded 只表示流程结束。未知负责人 / 日期保留空值并提示确认，不强迫模型填造。P5 再实现问题接受与执行门槛，P4 尚不可创建看板任务。
+每次 Planner 输出先存为 pending_review，每次审核结果新增版本，因此最终版本不一定为 1。状态 ready 表示审核问题均已处理；needs_attention 表示仍需人工处理；运行 succeeded 只表示流程结束。未知负责人 / 日期保留空值并提示确认，不强迫模型填造。P5 支持附理由接受可接受问题，程序硬错误必须修正。
 
 编辑必须携带当前 base_version，过期返回 409；编辑后旧审核失效，需提交新版本复核。人工改变负责人 / 日期时必须提供 resolution_note，服务器将对应依据标记为 human；模型不允许伪造人工确认。原文引用仍必须有效。当前复核会产生新的审核记录，不修改历史版本。
 
@@ -109,6 +109,49 @@ python scripts/smoke_planning.py
 ```
 
 脚本用临时数据库和真实 vLLM 检查分析、任务、审核、编辑、复核、旧版冲突及重启持久化；所有接口和工作流记录保留。真实模型可能产生不合理的审核意见，此时脚本明确失败，草稿停留 needs_attention，不把模型结果伪装成通过。
+
+## 确认执行与看板
+
+| 方法与路径 | 功能 |
+|---|---|
+| `POST /api/meetings/{id}/draft/accept-issues` | 按问题 ID 和理由接受语义意见 / 程序警告，新增版本 |
+| `POST /api/meetings/{id}/execute` | 明确确认当前版本，Executor 调用本地任务工具 |
+| `GET /api/meetings/{id}/execution` | 查看最近执行结果、run_id、任务 ID 和错误 |
+| `GET /api/tasks` | 看板分页，支持 meeting_id / status / owner 筛选 |
+| `PATCH /api/tasks/{id}` | 更新 todo / in_progress / done 状态 |
+
+执行示例（先查询最新草稿版本）：
+
+```bash
+curl --noproxy '*' -X POST http://127.0.0.1:8080/api/meetings/替换为会议ID/execute \
+  -H 'Content-Type: application/json' \
+  -d '{"draft_version":2,"confirm":true,"acknowledgement":"已核对并确认创建任务"}'
+```
+
+存在待处理问题时，必须先修正并复核，或对可接受问题逐条提交理由：
+
+```json
+{
+  "draft_version": 2,
+  "resolutions": [
+    {"issue_id": "替换为审核问题ID", "note": "已人工核实，允许当前暂不指定截止日期"}
+  ]
+}
+```
+
+只有完成 Reviewer 复核的草稿可接受问题；未审核草稿不能跳过复核。接受会生成新版本，执行时使用新版本号。无效引用、依赖环等程序硬错误不能接受；Executor 运行前和工具事务内再次校验。
+
+Executor 只选择 `create_tasks`，参数为空；服务端绑定会议、版本和任务内容，拒绝模型额外传入任务或任意工具。任务、执行成功记录、工具成功记录与草稿 confirmed 状态在一个事务内提交。模型称“已执行”不会产生成功状态，必须有工具落库结果。
+
+同一会议只执行一批任务，重复请求同一版本直接返回原结果，不再调用模型。并发执行中重复请求返回 409，结束后重试获取已有结果；旧版本始终返回 409。工具失败整批回滚，模型失败不创建任务，可再次确认重试（execution_id 复用、run_id 更新，历史运行保留）。已执行会议首版禁止编辑或重新分析。空任务列表允许确认并完成，创建数为 0。
+
+看板状态可来回更新，并记录 updated_at；首版不自动限制依赖任务状态，依赖信息供查看与跟进。执行成功后任务内容是持久化快照，暂只开放状态更新。
+
+```bash
+python scripts/smoke_execution.py
+```
+
+该脚本通过真实模型完成三角色审核和 Executor 工具选择，验证两项任务、旧版阻止、重复确认、状态更新及重启保留。中间产物保存在 `test_artifacts/api/..._execution_smoke/`，包含 reviewed_draft、execution 和 board；`test_artifacts/workflows/..._execution/` 包含 Executor 关联 trace_id 与真实工具结果。
 
 ## 模型调用与中间测试记录
 
@@ -162,6 +205,7 @@ bash -n scripts/run.sh
 python scripts/smoke_meetings.py
 python scripts/smoke_model.py
 python scripts/smoke_planning.py
+python scripts/smoke_execution.py
 ```
 
 `pytest` 离线执行，无需模型服务，数据库与模型记录使用测试临时目录；包含 PDF、SQLite 事务、模型客户端受控响应和失败边界验证。`smoke_meetings.py` 使用真实临时服务检查会议接口及重启持久化，不请求模型；`smoke_model.py` 需要真实 vLLM。两个脚本都保留记录在 test_artifacts 下。依赖声明在 `requirements.txt`；验收全项目后再生成环境快照。

@@ -32,4 +32,6 @@ test_artifacts/
 
 `python scripts/smoke_planning.py` 测试完整三角色链路、编辑复核和重启；API 目录中保存 initial_draft.json / final_draft.json。按 run_id 找 workflows/context.json，再按各角色 trace_id 找 llm 目录，即可对照输入、原始响应和程序处理结果。失败联调记录保留用于对照，不覆盖成成功结果。
 
+`python scripts/smoke_execution.py` 测试四角色、真实任务工具与看板：API 目录保留 01_reviewed_draft.json、02_execution.json、03_board.json，以及各次 HTTP 交换和重启日志。workflows 的 execution 目录保存 01_executor.json（模型 trace_id / 工具选择）与 02_tool_result.json（实际落库结果），按 run_id 关联。数据库中也保存工具调用成功记录；模型输出不作为执行成功证据。
+
 本地开发默认记录模型调用，可设 `PM_LLM_TRACE_ENABLED=false` 关闭。`PM_TEST_ARTIFACTS_PATH` 可调整保存位置。记录含输入会议和原始模型结果，仅供本地排查，不经 HTTP 暴露；鉴权头不保存，配置中的真实密钥做文本替换。思考文本只可能存在于原始响应文件，不作为用户结果展示。

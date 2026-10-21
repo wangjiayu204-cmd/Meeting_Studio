@@ -265,7 +265,7 @@ def test_workflow_timeout_releases_active_run(bundle):
 def test_v1_migrates_without_losing_meetings(bundle):
     _, database, sample, _, _, _ = bundle
     with database.connection() as connection:
-        for table in ("drafts", "analyses", "runs"):
+        for table in ("tool_calls", "tasks", "executions", "drafts", "analyses", "runs"):
             connection.execute(f"DROP TABLE {table}")
         connection.execute("PRAGMA user_version=1")
     database.initialize()
