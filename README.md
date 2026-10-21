@@ -52,6 +52,22 @@ flowchart TD
 
 模型服务独立部署。应用不依赖 CUDA 或 DCU 运行时；切换 NVIDIA / 海光 DCU 服务时，主要调整模型地址、模型名称与鉴权，并验证目标接口兼容性。
 
+### Agent 编排与配置位置
+
+Agent 编排通过 Python 代码定义，入口是 [app/workflows/analysis.py](app/workflows/analysis.py) 中的 `build_analysis_graph()`。当前分析流程为 `Manager → Planner → Reviewer`；Reviewer 根据审核结果和返工次数决定返回 Planner 或结束。Executor 在用户确认草稿后，由独立执行服务调用。
+
+| 调整内容 | 文件位置 | 说明 |
+|---|---|---|
+| 节点、执行顺序与返工条件 | [app/workflows/analysis.py](app/workflows/analysis.py) | LangGraph 状态、节点、边及条件路由 |
+| Manager / Planner / Reviewer 提示词 | [app/agents/prompts.py](app/agents/prompts.py) | 角色职责、输出要求和提示词版本 |
+| 三个分析角色的模型调用 | [app/agents/meeting.py](app/agents/meeting.py) | 各角色的输入上下文、输出契约及结构化调用 |
+| Executor 提示词与工具选择 | [app/agents/executor.py](app/agents/executor.py) | 执行角色提示词、工具调用输出契约 |
+| 分析与执行服务 | [app/services/planning.py](app/services/planning.py)、[app/services/execution.py](app/services/execution.py) | 工作流调用、时间预算、状态持久化与执行确认 |
+| 工具注册机制 | [app/tools/registry.py](app/tools/registry.py) | 工具白名单、参数校验与服务端上下文绑定 |
+| 运行参数 | [.env.example](.env.example)、[app/core/config.py](app/core/config.py) | 将模板复制为 `.env` 后配置；默认值及校验规则在 `Settings` 中定义 |
+
+调整模型地址、模型名称、返工上限或超时时，修改 `.env` 中的 `PM_LLM_BASE_URL`、`PM_LLM_MODEL`、`PM_MAX_REVISIONS`、`PM_WORKFLOW_TIMEOUT` 等参数；调整协作顺序或角色行为时，修改对应 Python 文件。修改后需重启应用生效。
+
 ## 快速开始
 
 ### 环境要求
