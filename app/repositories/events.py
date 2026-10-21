@@ -1,7 +1,6 @@
 import json
 
 from app.domain.schemas import Event, utc_now
-from app.domain.states import EventType
 from app.repositories.database import Database
 
 TERMINAL_EVENTS = {"run_completed", "run_failed", "run_interrupted"}

@@ -7,7 +7,7 @@ router = APIRouter(tags=["planning"])
 
 @router.post("/meetings/{meeting_id}/analysis", response_model=Draft)
 async def analyze(meeting_id: str, request: Request):
-    """P4 同请求等待分析完成；P6 再提供 202 后台运行与 SSE。"""
+    """等待分析完成；后台执行与 SSE 使用 /runs 接口。"""
     return await request.app.state.planning_service.analyze(meeting_id)
 
 
