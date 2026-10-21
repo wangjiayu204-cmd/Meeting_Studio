@@ -1,10 +1,12 @@
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Generic, TypeVar
 
 from pydantic import BaseModel, ConfigDict
 
 from app.core.errors import AppError
-from app.domain.schemas import Execution
+
+ContextT = TypeVar("ContextT")
+ResultT = TypeVar("ResultT")
 
 
 class CreateTasksArguments(BaseModel):
@@ -17,7 +19,7 @@ class ToolContext:
     run_id: str
 
 
-class ToolRegistry:
+class ToolRegistry(Generic[ContextT, ResultT]):
     def __init__(self):
         self._tools: dict[str, tuple[type[BaseModel], Callable]] = {}
 
@@ -30,7 +32,7 @@ class ToolRegistry:
         return [{"name": name, "arguments_schema": arguments.model_json_schema()}
                 for name, (arguments, _) in self._tools.items()]
 
-    def invoke(self, name: str, arguments: dict, context: ToolContext) -> Execution:
+    def invoke(self, name: str, arguments: dict, context: ContextT) -> ResultT:
         if name not in self._tools:
             raise AppError("tool_not_allowed", "请求的工具不在白名单中", 422)
         schema, handler = self._tools[name]

@@ -1,6 +1,6 @@
 # 智能会议与任务闭环管理
 
-当前完成 **P6：后台运行与实时进度**。包含四角色链路、审核草稿、确认执行、看板、有限后台队列、持久化事件、SSE 补读与失败重试。导出和前端按后续阶段交付。
+当前完成 **P7：JSON / ICS 导出与会议跟进**。包含四角色链路、审核草稿、确认执行、看板、后台队列、SSE 补读、失败重试、下载和跟进统计。前端在 P8 交付。
 
 实施步骤见 [模块化实施方案.md](模块化实施方案.md)。
 
@@ -200,6 +200,35 @@ python scripts/smoke_runs.py
 
 真实验证会主动断开并重连 SSE，对比补读事件，完成后台分析和执行，重启后再验证事件重放与任务保留。全过程留在 `test_artifacts/api/..._runs_smoke/`。
 
+## 导出与会议跟进（P7）
+
+以下接口均不调用模型，也不修改任务：
+
+| 接口 | 内容 |
+|---|---|
+| `GET /api/meetings/{id}/export?format=json` | 下载同一数据库快照中的会议原文、段落、最近分析及 run_id、当前草稿、执行记录和全部正式任务 |
+| `GET /api/meetings/{id}/export?format=ics` | 下载确认执行成功后的任务截止日期日历，未执行或失败时返回 409 |
+| `GET /api/meetings/{id}/followup` | 按会议 IANA 时区返回完成、待办、逾期、今日到期、缺失信息与待澄清事项 |
+
+JSON 可在分析 / 执行前下载，尚无数据的字段为空；当前草稿与正式 tasks 分开，JSON 是查看与备份产物，暂不提供导入恢复接口。多表在同一读取事务内生成，任务不受看板分页限制。最近分析可能来自尚未产出草稿的运行，可通过 analysis_run_id 与 draft.run_id 区分。
+
+ICS 使用 UTF-8、CRLF、75 字节折行及文本转义，每个任务生成稳定 UID 的 VEVENT。截止日期表示全天事件，DTEND 为次日（不包含）；日期不做 UTC 偏移。LAST-MODIFIED 表示任务更新时间，X-PM-TASK-STATUS 保存看板状态，完成项仍保留截止日期。日历客户端对重复导入的更新策略各异，系统不承诺自动同步。此功能只下载文件，不发送邀请或接入企业日历。
+
+缺少日期和无法表示次日的 9999-12-31 项不伪造日程：响应头 X-PM-Task-Count / X-PM-Skipped-Count 给出导出 / 跳过数量，文件中的 X-PM-SKIPPED-TASK 列出任务 ID 与原因；JSON 仍保留这些任务。成功执行的空计划可下载有效空日历。文件名只包含服务器会议 ID，下载返回 Cache-Control: no-store。
+
+跟进以请求时刻换算为会议当地日期：未完成且截止日期严格早于当天才算逾期；今日到期单列。overdue 与 due_today 都是 pending 的子集，不能重复相加；缺失负责人 / 日期计数也只统计未完成任务。未执行草稿不计入正式任务数，其缺失字段与 needs_confirmation 仍列为 origin=draft 的澄清项。报告保留分析未决议题、开放审核问题、任务引用及所有审核问题的处理说明，已接受问题不会再次列为开放问题。生成规则为确定性计算，不向模型请求编造后续安排。
+
+本地工具分为创建工具白名单（create_tasks）和只读工具白名单（export_calendar / get_task_status），查询工具的会议由服务端绑定，不接受会议 ID 参数。当前导出和跟进由用户通过 HTTP 发起，创建任务流程只允许选择 create_tasks。
+
+```bash
+curl --noproxy '*' -OJ 'http://127.0.0.1:8080/api/meetings/会议ID/export?format=json'
+curl --noproxy '*' -OJ 'http://127.0.0.1:8080/api/meetings/会议ID/export?format=ics'
+curl --noproxy '*' 'http://127.0.0.1:8080/api/meetings/会议ID/followup'
+python scripts/smoke_exports.py
+```
+
+真实验证目录 `test_artifacts/api/..._exports_smoke/` 包含 03_meeting_export.json、可导入的 04_tasks.ics、05_followup.json、重启后结果及全部 HTTP 交换和模型 / 工作流关联记录。
+
 ## 模型调用与中间测试记录
 
 `GET /api/model/health` 检查 `/v1/models` 是否包含配置的模型名称，正常时返回 model、latency_ms 和 trace_id；它不代表推理效果测试。真实推理请运行：
@@ -254,6 +283,7 @@ python scripts/smoke_model.py
 python scripts/smoke_planning.py
 python scripts/smoke_execution.py
 python scripts/smoke_runs.py
+python scripts/smoke_exports.py
 ```
 
 `pytest` 离线执行，无需模型服务，数据库与模型记录使用测试临时目录；包含 PDF、SQLite 事务、模型客户端受控响应和失败边界验证。`smoke_meetings.py` 使用真实临时服务检查会议接口及重启持久化，不请求模型；`smoke_model.py` 需要真实 vLLM。两个脚本都保留记录在 test_artifacts 下。依赖声明在 `requirements.txt`；验收全项目后再生成环境快照。

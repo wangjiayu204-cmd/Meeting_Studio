@@ -36,4 +36,6 @@ test_artifacts/
 
 `python scripts/smoke_runs.py` 验证后台提交与 SSE 真正流式接收：01_disconnected_events.json 保存主动断线前事件，02_reconnected_events.json 保存 Last-Event-ID 补读，04_execution_events.json 保存 Executor 与工具事件，05_full_replay / 06_restart_replay 用于对照全量和重启重放。每次收到事件即更新文件；summary.json 汇总事件数与运行 ID。SSE 不使用会一次读完正文的普通 HTTP 测试 hook。
 
+`python scripts/smoke_exports.py` 验证真实四角色执行后的 JSON / ICS / 跟进接口。API 目录保留 01_reviewed_draft.json、02_execution.json、03_meeting_export.json（完整会议与任务快照）、04_tasks.ics（实际下载文件，可导入日历）、05_followup.json 和 06_restart_followup.json。summary.json 给出任务数、日历项数、完成 / 待办 / 逾期等统计和重启结果；对应 HTTP 交换也全部保存。该脚本使用临时会议，执行前验证日历返回 409，执行后完成其中一个任务再导出，不修改现有业务数据库。
+
 本地开发默认记录模型调用，可设 `PM_LLM_TRACE_ENABLED=false` 关闭。`PM_TEST_ARTIFACTS_PATH` 可调整保存位置。记录含输入会议和原始模型结果，仅供本地排查，不经 HTTP 暴露；鉴权头不保存，配置中的真实密钥做文本替换。思考文本只可能存在于原始响应文件，不作为用户结果展示。

@@ -27,6 +27,9 @@ from app.services.execution import ExecutionService
 from app.services.runs import RunManager
 from app.repositories.events import EventRepository
 from app.api.runs import router as runs_router
+from app.api.reports import router as reports_router
+from app.repositories.reports import ReportRepository
+from app.services.reports import ReportService
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -49,7 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         application.state.run_manager = RunManager(application.state.planning_service,
                                                    application.state.execution_service, config)
-        logger.info("application_started phase=P6")
+        logger.info("application_started phase=P7")
         try:
             yield
         finally:
@@ -60,7 +63,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title=config.app_name,
         version=__version__,
-        description="轻量多 Agent 会议与任务管理。P6：后台队列、持久化事件与 SSE。",
+        description="轻量多 Agent 会议与任务管理。P7：JSON / ICS 导出与会议跟进。",
         lifespan=lifespan,
         responses={
             422: {"model": ErrorResponse, "description": "参数校验失败"},
@@ -72,6 +75,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.planning_repository = PlanningRepository(app.state.database)
     app.state.task_repository = TaskRepository(app.state.database)
     app.state.event_repository = EventRepository(app.state.database)
+    app.state.report_service = ReportService(ReportRepository(app.state.database))
     app.state.meeting_service = MeetingService(MeetingRepository(app.state.database), config)
     register_error_handlers(app)
     # 为 JSON 转义及 multipart 元数据预留空间；文件仍执行独立字节限制。
@@ -99,4 +103,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(planning_router, prefix="/api")
     app.include_router(tasks_router, prefix="/api")
     app.include_router(runs_router, prefix="/api")
+    app.include_router(reports_router, prefix="/api")
     return app
