@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     llm_api_key: SecretStr = SecretStr("EMPTY")
     llm_timeout: float = Field(default=180, gt=0, allow_inf_nan=False)
     llm_max_tokens: int = Field(default=6000, gt=0)
+    llm_total_timeout: float = Field(default=240, gt=0, allow_inf_nan=False)
+    llm_max_retries: int = Field(default=2, ge=0, le=3)
+    llm_trace_enabled: bool = True
+    test_artifacts_path: Path = Path("test_artifacts")
     max_document_chars: int = Field(default=24000, ge=10)
     max_upload_bytes: int = Field(default=10485760, gt=0)
     max_pdf_pages: int = Field(default=100, gt=0)
@@ -61,7 +65,7 @@ class Settings(BaseSettings):
     def valid_timezone(cls, value: str) -> str:
         return validate_timezone(value)
 
-    @field_validator("database_path")
+    @field_validator("database_path", "test_artifacts_path")
     @classmethod
     def resolve_database_path(cls, value: Path) -> Path:
         return (value if value.is_absolute() else PROJECT_ROOT / value).resolve()

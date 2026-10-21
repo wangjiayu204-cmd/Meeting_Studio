@@ -15,10 +15,15 @@ import time
 import httpx
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from app.core.artifacts import ArtifactRecord
+from app.core.config import Settings
 
 
 @contextmanager
-def server(database_path: Path, log_path: Path):
+def server(database_path: Path, log_path: Path, record: ArtifactRecord | None = None,
+           request_model_health: bool = False):
     with socket.socket() as candidate:
         candidate.bind(("127.0.0.1", 0))
         port = candidate.getsockname()[1]
@@ -30,7 +35,27 @@ def server(database_path: Path, log_path: Path):
             cwd=ROOT, env=environment, stdout=log, stderr=subprocess.STDOUT,
         )
         try:
-            with httpx.Client(base_url=f"http://127.0.0.1:{port}", trust_env=False, timeout=5) as client:
+            step = 0
+            def save_exchange(response):
+                nonlocal step
+                if record is None:
+                    return
+                step += 1
+                response.read()
+                # 保存请求正文与响应，不保存鉴权头；上传正文用于检查 multipart 元信息。
+                try:
+                    body = response.request.content.decode("utf-8", errors="replace")
+                except httpx.RequestNotRead:
+                    body = "[streaming request]"
+                phase = log_path.stem
+                record.write(f"{phase}_{step:02d}_exchange.json", {
+                    "method": response.request.method, "url": str(response.request.url),
+                    "request_body": body, "status_code": response.status_code,
+                    "request_id": response.headers.get("x-request-id"),
+                    "response_body": response.text,
+                })
+            with httpx.Client(base_url=f"http://127.0.0.1:{port}", trust_env=False, timeout=15,
+                              event_hooks={"response": [save_exchange]}) as client:
                 deadline = time.monotonic() + 15
                 while time.monotonic() < deadline:
                     if process.poll() is not None:
@@ -43,6 +68,9 @@ def server(database_path: Path, log_path: Path):
                     time.sleep(0.1)
                 else:
                     raise RuntimeError("服务启动超时")
+                if request_model_health:
+                    response = client.get("/api/model/health")
+                    assert response.status_code == 200, response.text
                 yield client
         finally:
             process.terminate()
@@ -53,11 +81,11 @@ def server(database_path: Path, log_path: Path):
                 process.wait(timeout=5)
 
 
-def main():
+def run_checks(record):
     with TemporaryDirectory(prefix="meeting-p2-") as directory:
         path = Path(directory)
         database = path / "pm.sqlite3"
-        with server(database, path / "server.log") as client:
+        with server(database, record.path / "server.log", record=record) as client:
             response = client.post("/api/meetings", json={
                 "title": "HTTP 冒烟会议", "meeting_date": "2026-10-21",
                 "text": "张三负责完成登录模块，周五提交联调报告。",
@@ -76,11 +104,26 @@ def main():
             missing = client.get("/api/meetings/not-found")
             assert missing.status_code == 404
             assert missing.json()["request_id"] == missing.headers["x-request-id"]
-        with server(database, path / "restart.log") as client:
+        with server(database, record.path / "restart.log", record=record) as client:
             assert client.get(f"/api/meetings/{saved['id']}").json() == saved
             assert client.get("/api/meetings").json()["total"] == 2
             assert client.get("/api/health").json()["database"] == "ok"
     print("P2 HTTP 冒烟通过：创建、上传、分页、错误、文档及重启持久化；临时服务和数据已清理。")
+
+
+def main():
+    settings = Settings()
+    record = ArtifactRecord(settings.test_artifacts_path / "api", "meetings_smoke",
+                            (settings.llm_api_key.get_secret_value(),))
+    record.write("context.json", {"scope": "meeting HTTP and restart", "uses_model": False})
+    try:
+        run_checks(record)
+        record.finish("succeeded")
+    except Exception as exc:
+        record.finish("failed", error_type=type(exc).__name__, message=str(exc))
+        raise
+    finally:
+        print(f"本次验证记录：{record.path}")
 
 
 if __name__ == "__main__":

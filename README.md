@@ -1,6 +1,6 @@
 # 智能会议与任务闭环管理
 
-当前完成 **P2：文档与数据**。包含应用基础、SQLite 持久化、TXT / 文本型 PDF 解析、会议创建与分页查询。Agent、草稿、看板与前端按后续阶段交付。
+当前完成 **P3：模型客户端**。包含文档与数据能力、vLLM HTTP 适配、结构化输出、有限重试及可查阅的中间测试记录。Agent、草稿、看板与前端按后续阶段交付。
 
 实施步骤见 [模块化实施方案.md](模块化实施方案.md)。
 
@@ -17,6 +17,7 @@ bash scripts/run.sh
 访问：
 
 - 健康检查：http://127.0.0.1:8080/api/health
+- 模型连接检查：http://127.0.0.1:8080/api/model/health
 - Swagger：http://127.0.0.1:8080/docs
 - OpenAPI：http://127.0.0.1:8080/openapi.json
 
@@ -34,7 +35,7 @@ PM_PORT=8081 bash scripts/run.sh
 
 配置优先级：显式参数（测试 / 应用工厂）> 环境变量 > 项目根目录 `.env` > 默认值。可复制 `.env.example` 为 `.env` 后修改，密钥不纳入 Git。
 
-模型地址默认 `http://127.0.0.1:8000/v1`，名称 `qwen3-8b`。切换 DCU 修改 `PM_LLM_BASE_URL` 和必要的鉴权。HTTP 调用将在 P3 实现。
+模型地址默认 `http://127.0.0.1:8000/v1`，名称 `qwen3-8b`。切换 DCU 修改 `PM_LLM_BASE_URL` 和必要的鉴权。HTTPX 使用 `trust_env=False`，模型请求直接访问配置地址，不读取环境代理。启动只创建客户端，不自动请求模型；模型离线不影响历史会议查询。
 
 数据库相对路径始终基于项目根目录解析，不随启动目录变化。启动自动初始化 `data/pm.sqlite3`，启用外键和 WAL，以 `PRAGMA user_version` 管理版本；遇到高于支持版本的数据库拒绝启动。数据库不提交 Git。日志只记录基础状态与请求 ID，不输出模型密钥或完整会议内容。
 
@@ -74,6 +75,29 @@ curl --noproxy '*' http://127.0.0.1:8080/api/meetings/upload \
 
 原文换行规范化、移除 NUL 字符并去除首尾空白；按非空行生成 `p0001` 等编号。原文与段落原子保存，不保存上传文件到用户指定路径。耗时解析和同步数据库操作在线程中运行。应用重启后数据保留，原文暂不提供修改接口以保证引用稳定。
 
+## 模型调用与中间测试记录
+
+`GET /api/model/health` 检查 `/v1/models` 是否包含配置的模型名称，正常时返回 model、latency_ms 和 trace_id；它不代表推理效果测试。真实推理请运行：
+
+```bash
+python scripts/smoke_model.py
+```
+
+该脚本会验证真实 FastAPI 模型健康接口，再调用 vLLM 提取示例会议的两个明确行动项，检查负责人、日期与引用，并打印保存路径。测试数据库和临时服务自动清理，中间记录保留。
+
+记录统一保存在 [test_artifacts](test_artifacts/README.md)：
+
+- `api/<时间_编号_标签>/`：接口测试各步骤响应、服务日志、总结果。
+- `llm/<时间_编号_标签>/`：提示词、Schema、每次请求、原始响应、清洗正文、校验问题、解析结果与总结果。
+- 优先查看 `summary.json` 判断成败，再查看 `01_request.json`、`01_response.json` 和 `result.json`。重试 / 降级 / 修复按 02、03 等编号保存。
+- 接口错误包含 trace_id，可以按该 ID 在记录中查找对应调用；正常日志不输出会议全文。
+
+本地开发默认启用模型调用记录；设置 `PM_LLM_TRACE_ENABLED=false` 可关闭，`PM_TEST_ARTIFACTS_PATH` 可更改目录。记录不提交 Git，也不通过 HTTP 提供下载。鉴权头不保存，配置密钥做文本替换；记录保留会议输入及原始模型输出，可能包含 think 标签，供你人工排查。
+
+模型客户端 `generate_structured(messages, schema)` 使用 JSON Schema 输出请求；服务明确不支持时降级为 JSON 提示词。兼容 think 标签与 JSON 围栏，结果经 Pydantic 校验；格式错误最多修复一次。重复 JSON 键、非标准 NaN、任意前后解释不被静默接受。输出截断、空正文、上下文超限及鉴权错误单独报告。
+
+默认单请求超时 `PM_LLM_TIMEOUT=180` 秒，整体预算 `PM_LLM_TOTAL_TIMEOUT=240` 秒（包含排队、重试及格式修复），临时错误重试上限 `PM_LLM_MAX_RETRIES=2`，同时调用上限 `PM_MAX_CONCURRENT_RUNS=1`。模型列表健康检查整体最多 10 秒。
+
 ## 数据契约
 
 - `app/domain/schemas.py`：会议、段落、分析、草稿、证据、审核、运行、任务、执行与事件模型。
@@ -100,6 +124,7 @@ cd /app/data/wjy/demo
 python -m pytest
 bash -n scripts/run.sh
 python scripts/smoke_meetings.py
+python scripts/smoke_model.py
 ```
 
-测试离线执行，无需模型服务，数据库使用测试临时目录；包含真实生成的 PDF 解析、SQLite 事务与重启持久化验证。`smoke_meetings.py` 会在临时端口启动两次真实服务，使用隔离数据库检查 HTTP 接口及重启持久化，结束后自动停止进程并清理临时数据。依赖声明在 `requirements.txt`；验收全项目后再生成环境快照。
+`pytest` 离线执行，无需模型服务，数据库与模型记录使用测试临时目录；包含 PDF、SQLite 事务、模型客户端受控响应和失败边界验证。`smoke_meetings.py` 使用真实临时服务检查会议接口及重启持久化，不请求模型；`smoke_model.py` 需要真实 vLLM。两个脚本都保留记录在 test_artifacts 下。依赖声明在 `requirements.txt`；验收全项目后再生成环境快照。

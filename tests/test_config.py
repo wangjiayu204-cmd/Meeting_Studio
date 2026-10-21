@@ -42,8 +42,16 @@ def test_database_path_is_independent_of_working_directory(monkeypatch, tmp_path
     {"llm_timeout": float("inf")},
     {"max_concurrent_runs": 0},
     {"max_revisions": -1},
+    {"llm_total_timeout": 0},
+    {"llm_max_retries": 4},
     {"timezone": "Invalid/Timezone"},
 ])
 def test_invalid_configuration_fails_early(overrides):
     with pytest.raises(ValidationError):
         Settings(_env_file=None, **overrides)
+
+
+def test_artifact_path_resolves_from_project_root(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    value = Settings(_env_file=None, test_artifacts_path="test_artifacts")
+    assert value.test_artifacts_path == PROJECT_ROOT / "test_artifacts"

@@ -10,3 +10,4 @@ htmlcov/
 *.log
 *.pid
 .venv/
+test_artifacts/*/

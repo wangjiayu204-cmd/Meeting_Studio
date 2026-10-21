@@ -8,12 +8,14 @@ from app import __version__
 from app.api.health import router as health_router
 from app.api.meetings import router as meetings_router
 from app.api.body_limit import BodyLimitMiddleware
+from app.api.model import router as model_router
 from app.core.config import Settings
 from app.core.errors import ErrorResponse, error_response, register_error_handlers
 from app.core.logging import configure_logging
 from app.repositories.database import Database
 from app.repositories.meetings import MeetingRepository
 from app.services.meetings import MeetingService
+from app.llm.client import ModelClient
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -23,16 +25,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         await run_in_threadpool(application.state.database.initialize)
-        logger.info("application_started phase=P2")
+        application.state.model_client = ModelClient(config)
+        logger.info("application_started phase=P3")
         try:
             yield
         finally:
+            await application.state.model_client.aclose()
             logger.info("application_stopped")
 
     app = FastAPI(
         title=config.app_name,
         version=__version__,
-        description="轻量多 Agent 会议与任务管理。P2：文档解析、会议持久化与查询。",
+        description="轻量多 Agent 会议与任务管理。P3：文档、数据和 HTTP 模型适配。",
         lifespan=lifespan,
         responses={
             422: {"model": ErrorResponse, "description": "参数校验失败"},
@@ -64,4 +68,5 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(health_router, prefix="/api")
     app.include_router(meetings_router, prefix="/api")
+    app.include_router(model_router, prefix="/api")
     return app
