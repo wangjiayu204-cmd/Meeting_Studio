@@ -93,9 +93,6 @@ PM_LLM_BASE_URL=http://127.0.0.1:8000/v1
 PM_LLM_MODEL=qwen3-8b
 PM_LLM_API_KEY=EMPTY
 ```
-
-`PM_LLM_BASE_URL` 包含 `/v1`，不要填写完整的 `/chat/completions` 路径。模型名称需与服务发布的名称一致；使用鉴权时替换 API Key。
-
 启动应用：
 
 ```bash
@@ -232,45 +229,3 @@ curl --noproxy '*' -X POST http://127.0.0.1:8080/api/meetings/MEETING_ID/runs \
 ├── requirements.txt
 └── README.md
 ```
-
-## 测试与诊断
-
-无需模型服务的回归测试：
-
-```bash
-python -m pytest -q
-```
-
-存在 Node.js 时，pytest 会运行前端行为测试；也可单独执行：
-
-```bash
-node --test tests/frontend/*.test.mjs
-```
-
-真实接口验证使用临时服务与隔离数据库。`smoke_meetings.py` 不调用模型，其余脚本需要模型服务；`smoke_interface.py` 还需要 Node.js 18+。
-
-```bash
-python scripts/smoke_meetings.py
-python scripts/smoke_model.py
-python scripts/smoke_planning.py
-python scripts/smoke_execution.py
-python scripts/smoke_runs.py
-python scripts/smoke_exports.py
-python scripts/smoke_interface.py
-```
-
-测试记录保存在 `test_artifacts/api`，模型调用位于 `test_artifacts/llm`，角色与工作流产物位于 `test_artifacts/workflows`。可按 `run_id` 和 `trace_id` 关联，详细说明见 [测试产物说明](test_artifacts/README.md)。
-
-模型质量会影响真实验证结果。接口流程通过不能替代提取准确率评估；部分前端链路验证会在隔离的固定样例中模拟人工核实并接受语义意见，具体过程会记录，产品不会自动放行。Node 模块测试不等同于浏览器布局或点击测试。
-
-## 运行约束与数据管理
-
-- **部署模式**：当前采用单进程调度，启动脚本固定一个 Uvicorn worker，不支持多实例共享同一业务库与运行队列。
-- **人工审核**：模型可能遗漏任务或误报审核问题。执行前需核对原文与当前草稿；空计划也可确认执行，不能仅凭 `ready` 判断会议没有行动项。
-- **输入范围**：支持 TXT 和文本型 PDF，不提供音频转写或扫描件 OCR。
-- **执行范围**：工具创建本地任务；不接入飞书、钉钉等外部平台，不发送日历邀请。
-- **任务管理**：执行后仅开放任务状态更新；依赖信息不会自动阻止人工切换状态。
-- **日历规则**：ICS 仅在执行成功后下载，截止日期表示全天事件；缺少日期的任务跳过并标明数量。JSON 导出不提供导入恢复功能。
-- **数据持久化**：数据库默认位于 `data/pm.sqlite3`，启用 WAL 和版本迁移。升级前应备份；可停服后确保数据库及相关 WAL 文件一致，或使用 SQLite backup API，避免运行中只复制主文件。
-- **诊断记录**：默认可能保存会议原文、提示词与原始模型响应。`.env`、业务数据和生成记录均被 Git 忽略；使用真实会议时应按需要关闭记录或管理其访问与保留期限。
-- **访问控制**：当前未实现应用层用户认证与租户隔离，默认监听回环地址。需要对外提供服务时，应由部署环境配置认证、TLS 和访问控制。
